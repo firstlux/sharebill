@@ -46,6 +46,11 @@
   #addFromDir button:hover { border-color: var(--primary); background: var(--chip); }
   #addFromDir button.grp { font-weight: 700; color: var(--primary); }
   .member .tag { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .pair { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
+  .pair .qr { background: #fff; border-radius: 8px; padding: 8px; flex: none; }
+  .pair .qr svg { display: block; width: 160px; height: 160px; }
+  .pair > div:last-child { flex: 1 1 200px; }
+  .pair p { margin: 0 0 8px; }
   .gchip { display: inline-flex; align-items: center; gap: 2px; background: var(--chip); border: 1px solid var(--line);
     border-radius: 999px; padding: 2px 4px 2px 12px; font-size: 14px; font-weight: 600; }
   .gchip button.x { padding: 2px 6px; }
@@ -190,7 +195,8 @@
   </section>
 
   <section class="card" data-page="dir">
-    <h2>Danh bạ <small>dùng chung cho mọi bill trên máy này</small></h2>
+    <h2>Danh bạ <small>dùng chung cho mọi bill</small></h2>
+    <div id="dirSync" class="groups-box" hidden></div>
     <div class="groups-box">
       <div class="chips" id="groupChips"></div>
       <form class="row" id="groupForm">
@@ -316,7 +322,13 @@ function load() {
   seedDirectory();
 
   const liveId = location.hash.match(/^#b=([\w-]{16,})$/);
-  if (liveId) {
+  const dirLink = location.hash.match(/^#d=([\w-]{16,})$/);
+  if (dirLink) {
+    // Link kết nối danh bạ từ thiết bị khác: gộp danh bạ máy này vào danh bạ đồng bộ
+    if (store.dirId !== dirLink[1]) { store.dirId = dirLink[1]; dirLive.join = true; }
+    openTab = 'dir';
+    history.replaceState(null, '', location.pathname);
+  } else if (liveId) {
     // Link bill sửa chung: dữ liệu sẽ được tải từ Firebase
     const id = liveId[1];
     if (!store.bills.some(b => b.id === id))
@@ -397,7 +409,7 @@ function addPeopleToBill(ids) {
   }
   return n;
 }
-function commit() { save(); render(); pushLive(); }
+function commit() { save(); render(); pushLive(); pushDir(); }
 
 // ---------- Sửa chung (Firebase Realtime Database) ----------
 // Mỗi bill online nằm ở bills/{id}; thành viên / khoản chi / thanh toán lưu dạng map theo id
@@ -519,6 +531,173 @@ async function goLive(ask = true) {
     return false;
   }
 }
+
+// ---------- Đồng bộ danh bạ (Firebase: dirs/{id}) ----------
+// Giống bill sửa chung: mã ngẫu nhiên 16 ký tự, ai có link #d=<mã> thì dùng chung danh bạ.
+const DIR_SYNC_KEY = 'sharebill-dirsync';
+const DIR_COLS = ['people', 'groups'];
+let dirLive = { unsub: [], last: null, ready: false, join: false, connected: undefined, error: null };
+let openTab = null;
+
+function dirToRemote() {
+  const r = { created: store.dirCreated ||= Date.now() };
+  let t = Date.now();
+  for (const c of DIR_COLS) { r[c] = {}; store[c].forEach(x => { x.o ??= t++; r[c][x.id] = x; }); }
+  return r;
+}
+function dirFlatten(r) {
+  const f = { created: stable(r.created) };
+  for (const c of DIR_COLS) for (const id in r[c] || {}) f[`${c}/${id}`] = stable(r[c][id]);
+  return f;
+}
+function setDirLast(f) {
+  dirLive.last = f;
+  try { localStorage.setItem(DIR_SYNC_KEY, JSON.stringify({ id: store.dirId, f })); } catch (e) {}
+}
+function pushDir() {
+  if (!store.dirId || !dirLive.ready || !fb) return;
+  const cur = dirFlatten(dirToRemote()), u = diff(cur, dirLive.last);
+  if (!Object.keys(u).length) return;
+  setDirLast(cur);
+  fb.update(fb.ref(fb.db, 'dirs/' + store.dirId), u).catch(e => { console.warn(e); toast('Không lưu được danh bạ lên mạng'); });
+}
+
+async function connectDir() {
+  dirLive.unsub.forEach(f => f());
+  dirLive = { unsub: [], last: null, ready: false, join: dirLive.join, connected: undefined, error: null };
+  renderDirSync();
+  if (!store.dirId) return;
+  if (!hasFirebase()) { dirLive.error = 'Chưa cấu hình Firebase'; return renderDirSync(); }
+  try { await firebase(); } catch (e) { dirLive.error = 'Không tải được Firebase'; return renderDirSync(); }
+  const id = store.dirId, ref = fb.ref(fb.db, 'dirs/' + id);
+  // Sửa lúc offline (đã lưu trên máy) thì đẩy lên trước khi nghe dữ liệu mới
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(DIR_SYNC_KEY)); } catch (e) {}
+  if (!dirLive.join && saved && saved.id === id) {
+    const u = diff(dirFlatten(dirToRemote()), saved.f);
+    if (Object.keys(u).length) fb.update(ref, u).catch(console.warn);
+  }
+  dirLive.unsub.push(fb.onValue(ref, snap => {
+    if (store.dirId !== id) return;
+    const val = snap.val();
+    if (!val) { dirLive.error = 'Không tìm thấy danh bạ, link có thể sai'; return renderDirSync(); }
+    applyRemoteDir(val);
+  }, e => {
+    console.warn(e);
+    dirLive.error = /permission/i.test(e.code || e.message) ? 'Firebase chưa cho phép đồng bộ danh bạ (cần cập nhật Rules)' : 'Lỗi đồng bộ danh bạ';
+    renderDirSync();
+  }));
+  dirLive.unsub.push(fb.onValue(fb.ref(fb.db, '.info/connected'), s => { dirLive.connected = s.val(); renderDirSync(); }));
+}
+
+function applyRemoteDir(val) {
+  const beforeP = new Map(store.people.map(p => [p.id, stable(p)]));
+  const beforeG = new Map(store.groups.map(g => [g.id, g.name]));
+  const localPeople = store.people, localGroups = store.groups;
+  store.dirCreated = val.created;
+  for (const c of DIR_COLS) store[c] = Object.values(val[c] || {}).sort((a, b) => a.o - b.o);
+  setDirLast(dirFlatten(val));
+  const joining = dirLive.join;
+  let merged = 0;
+  if (joining) { dirLive.join = false; merged = mergeLocalDir(localPeople, localGroups); }
+  dirLive.ready = true;
+  // Thay đổi từ thiết bị khác: cập nhật xuống các bill có người / nhóm đó
+  store.groups.forEach(g => { if (beforeG.get(g.id) !== g.name) propagateGroup(g); });
+  store.people.forEach(p => { if (beforeP.get(p.id) !== stable(p)) propagatePerson(p); });
+  save();
+  if (joining) {
+    pushDir();
+    toast(merged ? `Đã kết nối danh bạ, gộp thêm ${merged} người từ máy này` : 'Đã kết nối danh bạ đồng bộ');
+  }
+  pushLive();
+  renderSoon();
+}
+
+// Gộp danh bạ của máy này vào danh bạ đồng bộ (trùng tên thì dùng người có sẵn)
+function mergeLocalDir(people, groups) {
+  const gmap = {};
+  for (const g of groups) {
+    let G = store.groups.find(x => x.id === g.id || nameKey(x.name) === nameKey(g.name));
+    if (!G) store.groups.push(G = { id: g.id, name: g.name });
+    gmap[g.id] = G.id;
+  }
+  let n = 0;
+  for (const p of people) {
+    const P = store.people.find(x => x.id === p.id || nameKey(x.name) === nameKey(p.name));
+    if (!P) { store.people.push({ ...p, group: gmap[p.group] || '' }); n++; continue; }
+    if (!P.account && p.account) { P.bank = p.bank; P.account = p.account; }
+    if (P.id !== p.id) for (const b of store.bills) for (const m of b.members) if (pidOf(m) === p.id) m.pid = P.id;
+  }
+  for (const [from, to] of Object.entries(gmap)) if (from !== to)
+    for (const b of store.bills) for (const bg of b.groups) if (pidOf(bg) === from) bg.pid = to;
+  return n;
+}
+
+async function enableDirSync() {
+  try {
+    await firebase();
+    const id = longId();
+    store.dirCreated = Date.now();
+    await fb.set(fb.ref(fb.db, 'dirs/' + id), dirToRemote());
+    store.dirId = id;
+    dirLive.join = false;
+    setDirLast(dirFlatten(dirToRemote()));
+    save();
+    connectDir();
+    toast('Đã bật đồng bộ danh bạ');
+  } catch (e) {
+    console.warn(e);
+    toast(/permission/i.test(e.code || e.message)
+      ? 'Firebase chưa cho phép đồng bộ danh bạ: cần cập nhật Rules' : 'Không bật được đồng bộ: ' + (e.code || e.message));
+  }
+}
+function disableDirSync() {
+  if (!confirm('Ngắt đồng bộ danh bạ trên máy này? Danh bạ vẫn giữ trên máy, các thiết bị khác không bị ảnh hưởng.')) return;
+  dirLive.unsub.forEach(f => f());
+  dirLive = { unsub: [], last: null, ready: false, join: false, connected: undefined, error: null };
+  store.dirId = null;
+  try { localStorage.removeItem(DIR_SYNC_KEY); } catch (e) {}
+  save();
+  render();
+}
+const dirUrl = () => location.origin + location.pathname + '#d=' + store.dirId;
+
+function renderDirSync() {
+  const box = $('dirSync');
+  box.hidden = !hasFirebase();
+  if (box.hidden) return;
+  if (!store.dirId) {
+    box.innerHTML = `<div class="row"><span class="grow muted">Danh bạ đang chỉ lưu trên máy này.</span>
+      <button class="ghost" data-act="dirOn">☁️ Đồng bộ các thiết bị</button></div>`;
+    return;
+  }
+  const st = dirLive.error ? `<span class="live-status off"><b>●</b> ${esc(dirLive.error)}</span>`
+    : !dirLive.ready ? '<span class="live-status">☁️ Đang kết nối…</span>'
+    : dirLive.connected === false ? '<span class="live-status off"><b>●</b> Mất kết nối · sẽ gửi khi có mạng</span>'
+    : '<span class="live-status"><b>●</b> Danh bạ đã đồng bộ</span>';
+  box.innerHTML = `<div class="row">${st}<span class="grow"></span>
+      <button class="ghost" data-act="dirPair">📱 Thêm thiết bị</button>
+      <button class="x" data-act="dirOff">Ngắt</button></div>` +
+    (box.dataset.open !== '1' ? '' : `
+      <div class="pair">
+        <div class="qr">${qrSvg(dirUrl())}</div>
+        <div>
+          <p>Quét mã này bằng camera điện thoại, hoặc mở link trên thiết bị khác để dùng chung danh bạ.</p>
+          <p class="muted">Link này như mật khẩu: ai có link sẽ xem và sửa được danh bạ, kể cả số tài khoản. Đừng gửi vào nhóm chat chung.</p>
+          <button class="ghost" data-act="dirCopy">🔗 Copy link</button>
+        </div>
+      </div>`);
+}
+$('dirSync').addEventListener('click', async e => {
+  const act = e.target.dataset.act;
+  if (act === 'dirOn') enableDirSync();
+  else if (act === 'dirOff') disableDirSync();
+  else if (act === 'dirPair') { $('dirSync').dataset.open = $('dirSync').dataset.open === '1' ? '' : '1'; renderDirSync(); }
+  else if (act === 'dirCopy') {
+    try { await navigator.clipboard.writeText(dirUrl()); toast('Đã copy link kết nối danh bạ'); }
+    catch { prompt('Copy link này:', dirUrl()); }
+  }
+});
 
 // Đang gõ dở trong ô nhập thì chờ rời ô rồi mới vẽ lại, tránh mất chữ
 let renderPending = false;
@@ -821,6 +1000,7 @@ function render() {
 // Trang "Thành viên của bill" và trang "Danh bạ"
 function renderPeople() {
   $('dirCount').textContent = store.people.length ? `(${store.people.length})` : '';
+  renderDirSync();
   const bankOpts = '<option value="">— Ngân hàng —</option>' + BANKS.map(b => `<option value="${b[0]}">${b[1]}</option>`).join('');
   const groupOpts = '<option value="">Không nhóm</option>' + store.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
   const bankRow = x => `
@@ -1213,6 +1393,8 @@ let savedTab = 'bill';
 try { savedTab = localStorage.getItem(TAB_KEY) || 'bill'; } catch (e) {}
 setTab(savedTab);
 tabForBill();
+if (openTab) setTab(openTab);
+connectDir();
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(console.warn);

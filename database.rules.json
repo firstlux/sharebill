@@ -6,6 +6,13 @@
         ".write": "$billId.length >= 16 && newData.exists()",
         ".validate": "newData.hasChildren(['created'])"
       }
+    },
+    "dirs": {
+      "$dirId": {
+        ".read": "$dirId.length >= 16",
+        ".write": "$dirId.length >= 16 && newData.exists()",
+        ".validate": "newData.hasChildren(['created'])"
+      }
     }
   }
 }
