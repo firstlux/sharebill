@@ -30,12 +30,12 @@
     font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .wrap { max-width: 880px; margin: 0 auto; padding: 20px 16px 60px; }
   header { margin-bottom: 12px; }
-  header .top { flex-wrap: nowrap; }
-  header .logo { font-size: 24px; flex: none; }
+  header .top { flex-wrap: nowrap; align-items: flex-start; }
   :root { color-scheme: light dark; }
-  .title-box { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+  /* lùi trái đúng bằng padding của ô nhập để chữ thẳng hàng với các nút và khung bên dưới */
+  .title-box { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; margin-left: -9px; }
   #billName { width: 100%; font-size: 20px; font-weight: 700; background: transparent; border-color: transparent; padding: 4px 8px; }
-  #billDate { font-size: 13px; color: var(--muted); background: transparent; border-color: transparent; padding: 0 8px; }
+  #billDate { font-size: 13px; color: var(--muted); background: transparent; border-color: transparent; padding: 2px 8px; }
   #billName:hover, #billDate:hover { border-color: var(--line); }
   tr.editing td { background: var(--chip); }
   .groups-box { border: 1px dashed var(--line); border-radius: 10px; padding: 10px; margin-bottom: 12px; }
@@ -73,7 +73,7 @@
   @media (prefers-color-scheme: dark) { .badge { color: #04201d; } }
   header .actions { margin-top: 6px; }
   header .actions button { padding: 6px 10px; font-size: 14px; }
-  header .actions #btnDelete { margin-left: auto; }
+  header .actions #btnDelete { margin-left: auto; margin-right: -10px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
     padding: 16px; margin-bottom: 16px; }
   .card h2 { margin: 0 0 12px; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
@@ -155,7 +155,6 @@
 <div class="wrap">
   <header>
     <div class="row top">
-      <span class="logo" aria-hidden="true">🧾</span>
       <div class="title-box grow">
         <input id="billName" placeholder="Tên bill, vd: Đi Đà Lạt" aria-label="Tên bill">
         <input id="billDate" type="date" aria-label="Ngày bill" title="Ngày bill">
