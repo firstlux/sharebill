@@ -80,6 +80,15 @@
   .paid .who { flex: 1; color: var(--muted); }
   .paid .who b { color: var(--pos); }
   .done-all { text-align: center; padding: 12px; font-weight: 600; color: var(--pos); }
+  .tabs { position: sticky; top: 0; z-index: 5; display: flex; gap: 4px; padding: 6px;
+    margin: 0 0 16px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+  .tabs button { flex: 1; background: transparent; color: var(--muted); }
+  .tabs button:hover { background: var(--chip); color: var(--text); }
+  .tabs button[aria-selected="true"] { background: var(--primary); color: #fff; }
+  @media (prefers-color-scheme: dark) { .tabs button[aria-selected="true"] { color: #04201d; } }
+  .tabs .count { font-weight: 400; opacity: .8; }
+  .linklike { background: none; color: var(--primary); padding: 0; font-weight: 600; }
+  .linklike:hover { background: none; text-decoration: underline; }
   .live-row:not(:has(:not([hidden]))) { display: none; }
   .live-status { font-size: 13px; color: var(--muted); }
   .live-status b { color: var(--pos); font-weight: 600; }
@@ -115,8 +124,13 @@
     </div>
   </header>
 
-  <section class="card">
-    <h2>1. Thành viên</h2>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="bill">🧾 Bill</button>
+    <button role="tab" data-tab="members">👥 Thành viên <span class="count" id="memberCount"></span></button>
+  </nav>
+
+  <section class="card" data-page="members">
+    <h2>Thành viên</h2>
     <form class="row" id="memberForm">
       <input id="memberName" class="grow" placeholder="Tên thành viên (nhiều tên cách nhau dấu phẩy)" autocomplete="off">
       <button>Thêm</button>
@@ -125,8 +139,8 @@
     <div id="members"></div>
   </section>
 
-  <section class="card">
-    <h2>2. Khoản chi</h2>
+  <section class="card" data-page="bill">
+    <h2>1. Khoản chi</h2>
     <form class="row exp-form" id="expForm">
       <input id="expDesc" class="grow" placeholder="Nội dung, vd: Ăn tối" autocomplete="off">
       <input id="expAmount" inputmode="numeric" placeholder="Số tiền" style="width:140px" autocomplete="off">
@@ -150,8 +164,8 @@
     </div>
   </section>
 
-  <section class="card">
-    <h2>3. Tổng kết</h2>
+  <section class="card" data-page="bill">
+    <h2>2. Tổng kết</h2>
     <div style="overflow-x:auto">
       <table>
         <thead><tr><th>Thành viên</th><th class="num">Đã chi</th><th class="num">Phần phải chịu</th><th class="num">Chênh lệch</th></tr></thead>
@@ -160,8 +174,8 @@
     </div>
   </section>
 
-  <section class="card">
-    <h2>4. Chuyển khoản &amp; mã QR <small id="progress"></small></h2>
+  <section class="card" data-page="bill">
+    <h2>3. Chuyển khoản &amp; mã QR <small id="progress"></small></h2>
     <p class="muted" style="margin-top:-6px">Số lần chuyển đã được tối giản. Quét QR bằng app ngân hàng bất kỳ (chuẩn VietQR/Napas). Chuyển xong thì bấm “Đã trả”.</p>
     <div class="transfers" id="transfers"></div>
     <div class="paid-list" id="paidList"></div>
@@ -492,7 +506,10 @@ function renderSplit() {
   box.dataset.bill = state.id;
   $('btnAll').style.display = mode === 'equal' ? '' : 'none';
 
-  if (!state.members.length) { box.innerHTML = '<span class="muted">Thêm thành viên trước</span>'; return; }
+  if (!state.members.length) {
+    box.innerHTML = '<span class="muted">Chưa có thành viên. </span><button type="button" class="linklike" data-goto="members">Thêm thành viên →</button>';
+    return;
+  }
   if (mode === 'equal') {
     box.innerHTML = '<div class="chips">' + state.members.map(m =>
       `<label><input type="checkbox" data-m="${m.id}" ${prev[m.id] === false ? '' : 'checked'}>${esc(m.name)}</label>`
@@ -533,6 +550,7 @@ function splitText(e) {
 function render() {
   renderPending = false;
   renderBills();
+  $('memberCount').textContent = state.members.length ? `(${state.members.length})` : '';
   if (document.activeElement !== $('billName')) $('billName').value = state.name;
 
   // Thành viên
@@ -592,7 +610,8 @@ function render() {
     const info = `${from.name} tra ${billName}`;
     const qr = hasBank ? `<div class="qr">${qrSvg(vietQR(to.bank, to.account.replace(/\s/g, ''), t.amount, info))}</div>
       <div class="bank">${esc(bankName(to.bank))} · ${esc(to.account)}<br>ND: ${esc(noAccent(info))}</div>`
-      : `<div class="bank" style="margin-top:12px">⚠️ ${esc(to.name)} chưa nhập ngân hàng / số tài khoản</div>`;
+      : `<div class="bank" style="margin-top:12px">⚠️ ${esc(to.name)} chưa nhập ngân hàng / số tài khoản<br>
+          <button type="button" class="linklike" data-goto="members">Nhập ngay →</button></div>`;
     return `<div class="tf"><div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(t.amount)}</div>${qr}
       <button data-act="pay" data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}">✓ Đã trả</button></div>`;
   }).join('') || (payments.length ? '<div class="done-all">🎉 Đã thanh toán xong!</div>'
@@ -605,13 +624,31 @@ function render() {
     </div>`).join('');
 }
 
+// ---------- Tab Bill / Thành viên ----------
+const TAB_KEY = 'sharebill-tab';
+function setTab(t) {
+  document.querySelectorAll('[data-page]').forEach(s => s.hidden = s.dataset.page !== t);
+  document.querySelectorAll('.tabs [data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
+  try { localStorage.setItem(TAB_KEY, t); } catch (e) {}
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-tab], [data-goto]');
+  if (!b) return;
+  setTab(b.dataset.tab || b.dataset.goto);
+  if (b.dataset.goto) document.querySelector('.tabs').scrollIntoView({ behavior: 'smooth' });
+});
+// Bill chưa có thành viên thì mở thẳng trang Thành viên
+// (bill online đang tải từ link thì chưa có thành viên, giữ nguyên tab)
+const tabForBill = () => { if (!state.members.length && !state.online) setTab('members'); };
+
 // ---------- Sự kiện ----------
-$('billSelect').addEventListener('change', e => { selectBill(e.target.value); commit(); });
+$('billSelect').addEventListener('change', e => { selectBill(e.target.value); commit(); tabForBill(); });
 $('btnNew').addEventListener('click', () => {
   const b = newBill();
   store.bills.unshift(b);
   selectBill(b.id);
   commit();
+  setTab('members');
   $('billName').focus();
 });
 $('btnLive').addEventListener('click', goLive);
@@ -743,6 +780,10 @@ function toast(msg) {
 
 load();
 render();
+let savedTab = 'bill';
+try { savedTab = localStorage.getItem(TAB_KEY) || 'bill'; } catch (e) {}
+setTab(savedTab);
+tabForBill();
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(console.warn);
