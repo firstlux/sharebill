@@ -46,6 +46,24 @@
   #addFromDir button:hover { border-color: var(--primary); background: var(--chip); }
   #addFromDir button.grp { font-weight: 700; color: var(--primary); }
   .member .tag { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  #dirSearch { width: 100%; margin-bottom: 8px; }
+  .scan-btn { flex: none; padding: 6px 10px; }
+  #scanDialog, #appDialog { width: min(92vw, 420px); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+    background: var(--card); color: var(--text); }
+  #scanDialog::backdrop, #appDialog::backdrop { background: rgba(0, 0, 0, .5); }
+  #scanDialog h3, #appDialog h3 { margin: 0 0 4px; font-size: 18px; }
+  #scanDialog p, #appDialog p { margin: 0 0 10px; }
+  #scanVideo { width: 100%; max-height: 50vh; border-radius: 10px; background: #000; object-fit: cover; margin-bottom: 8px; }
+  #scanMsg:empty { display: none; }
+  .file-btn { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 600; }
+  .file-btn:hover { background: var(--chip); }
+  #appSearch { width: 100%; margin-bottom: 8px; }
+  .app-list { max-height: 50vh; overflow-y: auto; display: grid; gap: 6px; }
+  .app-list button { display: flex; align-items: center; gap: 8px; text-align: left; background: var(--chip); color: var(--text);
+    border: 1px solid var(--line); font-weight: 500; }
+  .app-list button:hover { border-color: var(--primary); background: var(--chip); }
+  .app-list .auto { margin-left: auto; font-size: 12px; color: var(--primary); font-weight: 700; white-space: nowrap; }
+  .tf button.x { width: auto; margin-top: 4px; padding: 2px 8px; }
   #whoDialog { width: min(92vw, 380px); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
     background: var(--card); color: var(--text); }
   #whoDialog::backdrop { background: rgba(0, 0, 0, .5); }
@@ -256,6 +274,7 @@
       <select id="personGroup" title="Nhóm" hidden></select>
       <button>Thêm</button>
     </form>
+    <input id="dirSearch" type="search" placeholder="🔍 Tìm theo tên hoặc số tài khoản" autocomplete="off">
     <div id="dirFilter" class="dir-filter"></div>
     <div id="people"></div>
   </section>
@@ -325,20 +344,92 @@
   </form>
   <button type="button" class="x" id="whoSkip">Chỉ xem, bỏ qua</button>
 </dialog>
+<dialog id="scanDialog">
+  <h3>Quét QR tài khoản ngân hàng</h3>
+  <p class="muted">Đưa mã QR nhận tiền (trong app ngân hàng) vào khung, hoặc chọn ảnh QR đã lưu trong máy.</p>
+  <video id="scanVideo" playsinline muted hidden></video>
+  <p id="scanMsg" class="neg"></p>
+  <div class="row">
+    <label class="file-btn">🖼️ Chọn ảnh QR<input type="file" id="scanFile" accept="image/*" hidden></label>
+    <span class="grow"></span>
+    <button type="button" class="ghost" id="scanClose">Đóng</button>
+  </div>
+</dialog>
+<dialog id="appDialog">
+  <h3>Mở bằng app ngân hàng nào?</h3>
+  <p class="muted">App sẽ được mở lên, số tài khoản người nhận được copy sẵn để bạn dán vào. Nhớ nhập đúng số tiền.</p>
+  <input id="appSearch" type="search" placeholder="🔍 Tìm app…" autocomplete="off">
+  <div id="appList" class="app-list"></div>
+  <button type="button" class="x" id="appClose" style="width:100%;margin-top:8px">Đóng</button>
+</dialog>
 <div class="toast" id="toast"></div>
 
 <script>
-// Mã BIN ngân hàng theo Napas (dùng cho VietQR)
+// Ngân hàng theo Napas (dùng cho VietQR)
+// [BIN Napas, tên, mã ngân hàng (dùng cho link mở app)]
 const BANKS = [
-  ['970436','Vietcombank'], ['970415','VietinBank'], ['970418','BIDV'], ['970405','Agribank'],
-  ['970407','Techcombank'], ['970422','MB Bank'], ['970416','ACB'], ['970432','VPBank'],
-  ['970423','TPBank'], ['970403','Sacombank'], ['970437','HDBank'], ['970441','VIB'],
-  ['970443','SHB'], ['970431','Eximbank'], ['970426','MSB'], ['970448','OCB'],
-  ['970440','SeABank'], ['970449','LPBank'], ['970428','Nam A Bank'], ['970409','Bac A Bank'],
-  ['970454','BVBank (Timo)'], ['970425','ABBANK'], ['970452','KienlongBank'], ['970412','PVcomBank'],
-  ['970427','VietABank'], ['970438','BaoViet Bank'], ['970419','NCB'], ['970430','PGBank'],
-  ['970400','Saigonbank'], ['970406','DongA Bank'], ['970408','GPBank'], ['970414','OceanBank'],
-  ['546034','CAKE by VPBank'], ['546035','Ubank by VPBank'],
+  ['970436','Vietcombank','vcb'], ['970415','VietinBank','icb'], ['970418','BIDV','bidv'],
+  ['970405','Agribank','vba'], ['970407','Techcombank','tcb'], ['970422','MB Bank','mb'],
+  ['970416','ACB','acb'], ['970432','VPBank','vpb'], ['970423','TPBank','tpb'],
+  ['970403','Sacombank','stb'], ['970437','HDBank','hdb'], ['970441','VIB','vib'],
+  ['970443','SHB','shb'], ['970431','Eximbank','eib'], ['970426','MSB','msb'],
+  ['970448','OCB','ocb'], ['970440','SeABank','seab'], ['970449','LPBank','lpb'],
+  ['970428','Nam A Bank','nab'], ['970409','Bac A Bank','bab'], ['970454','BVBank (Timo)','vccb'],
+  ['970425','ABBANK','abb'], ['970452','KienlongBank','klb'], ['970412','PVcomBank','pvcb'],
+  ['970427','VietABank','vab'], ['970438','BaoViet Bank','bvb'], ['970419','NCB','ncb'],
+  ['970430','PGBank','pgb'], ['970400','Saigonbank','sgicb'], ['970406','DongA Bank','vikki'],
+  ['970408','GPBank','gpb'], ['970414','OceanBank','mbv'], ['546034','CAKE by VPBank','cake'],
+  ['546035','Ubank by VPBank','ubank'], ['970444','CBBank','cbb'], ['422589','CIMB','cimb'],
+  ['533948','Citibank','citibank'], ['970446','COOPBANK','coopbank'], ['796500','DBSBank','dbs'],
+  ['970442','HongLeong','hlbvn'], ['458761','HSBC','hsbc'], ['970456','IBKHCM','ibk - hcm'],
+  ['970455','IBKHN','ibk - hn'], ['970434','IndovinaBank','ivb'], ['668888','KBank','kbank'],
+  ['970466','KEBHanaHCM','kebhanahcm'], ['970467','KEBHANAHN','kebhanahn'], ['970463','KookminHCM','kbhcm'],
+  ['970462','KookminHN','kbhn'], ['977777','MAFC','mafc'], ['971025','MoMo','momo'],
+  ['801011','Nonghyup','nhb hn'], ['970439','PublicBank','pbvn'], ['971133','PVcomBank Pay','pvdb'],
+  ['970429','SCB','scb'], ['970424','ShinhanBank','shbvn'], ['970410','StandardChartered','scvn'],
+  ['963388','Timo','timo'], ['970458','UnitedOverseas','uob'], ['999888','VBSP','vbsp'],
+  ['970433','VietBank','vietbank'], ['971005','ViettelMoney','vtlmoney'], ['971011','VNPTMoney','vnptmoney'],
+  ['970421','VRB','vrb'], ['970457','Woori','wvn'],
+];
+// [mã app, tên app, cờ autofill của VietQR] — theo api.vietqr.io; link dl.vietqr.io/pay?app=<mã> mở app đó
+const BANK_APPS = [
+  ['mb','MB Bank',1],
+  ['vcb','Vietcombank',0],
+  ['vba','Agribank E-Mobile Banking',0],
+  ['icb','VietinBank iPay',1],
+  ['bidv','BIDV SmartBanking',1],
+  ['tcb','Techcombank Mobile',0],
+  ['vpb','VPBank NEO',0],
+  ['cake','CAKE - Digital Banking',0],
+  ['ocb','OCB OMNI - Digital Bank',1],
+  ['tpb','TPBank Mobile',0],
+  ['acb','ACB One',1],
+  ['lpb','Liên Việt 24h',0],
+  ['timo','Timo Digital Bank',0],
+  ['vib-2','MyVIB 2.0',0],
+  ['hdb','HDBank',0],
+  ['vib','MyVIB',0],
+  ['shb','SHB SAHA',0],
+  ['seab','SeAMobile',0],
+  ['shbvn','Shinhan Bank Vietnam SOL',0],
+  ['scb','SCB Mobile Banking',0],
+  ['nab','Nam A Bank - Open Banking',0],
+  ['abb','ABBank',0],
+  ['eib','Eximbank EDigi',0],
+  ['coopbank','Co-opBank Mobile Banking',0],
+  ['pvcb','PVConnect',0],
+  ['vietbank','Vietbank Digital',0],
+  ['wvn','Woori WON Vietnam',0],
+  ['klb','KienlongBank Plus',0],
+  ['bvb','BAOVIET Smart',0],
+  ['vab','Vietbank Digital Plus',0],
+  ['tpb-pay','TPBank QuickPay',0],
+  ['ncb','NCB iziMobile',0],
+  ['acb-biz','ACB One Biz',0],
+  ['oceanbank','OceanBank',0],
+  ['pbvn','PB engage VN',0],
+  ['sgicb','SAIGONBANK Smart Banking',0],
+  ['cimb','OCTO by CIMB',0],
 ];
 const bankName = bin => (BANKS.find(b => b[0] === bin) || [, ''])[1];
 
@@ -1169,7 +1260,7 @@ function render() {
     const data = `data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}"`;
     const qr = hasBank ? `<div class="qr">${qrSvg(qrPayload(to, t.amount, info))}</div>
       <div class="bank">${esc(bankName(to.bank))} · ${esc(to.account)}<br>ND: ${esc(noAccent(info))}</div>
-      <button class="ghost" data-act="qrImg" ${data}>⬇ Tải ảnh QR</button>`
+      <button class="ghost" data-act="qrImg" ${data}>⬇ Tải ảnh QR</button>${appButtons(data)}`
       : `<div class="bank" style="margin-top:12px">⚠️ ${esc(to.name)} chưa nhập ngân hàng / số tài khoản<br>
           <button type="button" class="linklike" data-goto="members">Nhập ngay →</button></div>`;
     return `<div class="tf${isMine(t) ? ' mine' : ''}" id="tf-${t.from}-${t.to}">
@@ -1195,7 +1286,8 @@ function renderPeople() {
   const bankRow = x => `
       <div class="row">
         <select data-f="bank" style="flex:1 1 160px">${bankOpts}</select>
-        <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 160px" value="${esc(x.account || '')}">
+        <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 140px" value="${esc(x.account || '')}">
+        <button type="button" class="ghost scan-btn" data-scan title="Quét QR ngân hàng để tự điền">📷</button>
       </div>`;
   // Nhóm danh bạ + ô chọn nhóm cho người mới
   $('groupChips').innerHTML = store.groups.map(g => `
@@ -1248,8 +1340,11 @@ function renderPeople() {
     [NO_GROUP, 'Chưa có nhóm', store.people.filter(noGroup).length]];
   $('dirFilter').innerHTML = !store.groups.length ? '' : filters.map(([id, name, n]) =>
     `<button type="button" class="${dirFilter === id ? 'on' : ''}" data-filter="${id}">${esc(name)} (${n})</button>`).join('');
+  // Tìm theo tên (không phân biệt dấu, hoa thường) hoặc số tài khoản
+  const q = nameKey($('dirSearch').value), qDigits = $('dirSearch').value.replace(/\D/g, '');
   const shown = ordered(store.groups, store.people)
-    .filter(p => !dirFilter || (dirFilter === NO_GROUP ? noGroup(p) : inGroup(p, dirFilter)));
+    .filter(p => !dirFilter || (dirFilter === NO_GROUP ? noGroup(p) : inGroup(p, dirFilter)))
+    .filter(p => !q || nameKey(p.name).includes(q) || (qDigits && (p.account || '').includes(qDigits)));
   const dirCard = p => `
     <div class="member" data-id="${p.id}">
       <div class="row top-line">
@@ -1263,11 +1358,164 @@ function renderPeople() {
       ${bankRow(p)}
     </div>`;
   $('people').innerHTML = !store.people.length ? '<div class="empty">Danh bạ trống</div>'
-    : shown.map(dirCard).join('') || '<div class="empty">Không có ai trong nhóm này</div>';
+    : shown.map(dirCard).join('') || `<div class="empty">${q ? 'Không tìm thấy ai' : 'Không có ai trong nhóm này'}</div>`;
   shown.forEach(p => $('people').querySelector(`[data-id="${p.id}"] [data-f=bank]`).value = p.bank || '');
 }
 const NO_GROUP = '__none';
 let dirFilter = '';
+
+// ---------- Quét QR ngân hàng để điền ngân hàng + số tài khoản ----------
+// VietQR (EMVCo): tag 38 = { 00: A000000727, 01: { 00: BIN, 01: số TK }, 02: QRIBFTTA (TK) | QRIBFTTC (thẻ) }
+function parseTLV(s) {
+  const o = {};
+  for (let i = 0; i + 4 <= s.length;) {
+    const id = s.slice(i, i + 2), len = parseInt(s.slice(i + 2, i + 4), 10);
+    if (isNaN(len)) break;
+    o[id] = s.slice(i + 4, i + 4 + len);
+    i += 4 + len;
+  }
+  return o;
+}
+function parseVietQR(text) {
+  const mai = parseTLV(parseTLV(String(text).trim())['38'] || '');
+  if (mai['00'] !== 'A000000727' || !mai['01']) return null;
+  const acc = parseTLV(mai['01']);
+  return acc['00'] && acc['01'] ? { bin: acc['00'], account: acc['01'], card: mai['02'] === 'QRIBFTTC' } : null;
+}
+
+let scanTarget = null, scanStream = null, scanTimer = null, detector = null;
+try { if ('BarcodeDetector' in window) detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) {}
+// Chrome Android có sẵn BarcodeDetector; iPhone / máy khác dùng jsQR (tải khi cần)
+async function loadJsQR() {
+  if (window.jsQR) return;
+  await new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = 'jsQR.min.js'; s.onload = ok; s.onerror = fail;
+    document.head.append(s);
+  });
+}
+async function decodeQR(source, w, h) {
+  if (detector) { try { const r = await detector.detect(source); if (r[0]) return r[0].rawValue; } catch (e) {} }
+  await loadJsQR();
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  x.drawImage(source, 0, 0, w, h);
+  const r = jsQR(x.getImageData(0, 0, w, h).data, w, h);
+  return r && r.data;
+}
+async function openScanner(target) {
+  scanTarget = target;
+  $('scanMsg').textContent = '';
+  $('scanFile').value = '';
+  $('scanDialog').showModal();
+  const v = $('scanVideo');
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    if (!$('scanDialog').open) return stopScanner();
+    v.srcObject = scanStream; v.hidden = false;
+    await v.play();
+    const tick = async () => {
+      if (!scanStream) return;
+      if (v.videoWidth) {
+        const k = Math.min(1, 640 / v.videoWidth);
+        const text = await decodeQR(v, Math.round(v.videoWidth * k), Math.round(v.videoHeight * k));
+        if (text && applyScan(text)) return;
+      }
+      scanTimer = setTimeout(tick, 250);
+    };
+    tick();
+  } catch (e) {
+    console.warn(e);
+    v.hidden = true;
+    $('scanMsg').textContent = 'Không mở được camera. Bạn có thể chọn ảnh QR đã lưu trong máy.';
+  }
+}
+function stopScanner() {
+  clearTimeout(scanTimer);
+  scanStream?.getTracks().forEach(t => t.stop());
+  scanStream = null;
+  $('scanVideo').srcObject = null;
+  if ($('scanDialog').open) $('scanDialog').close();
+}
+// Điền vào thành viên bill hoặc người trong danh bạ (và cập nhật luôn các nơi liên quan)
+function applyScan(text) {
+  const info = parseVietQR(text);
+  if (!info) { $('scanMsg').textContent = 'Đây không phải mã QR chuyển khoản ngân hàng (VietQR).'; return false; }
+  if (info.card) { $('scanMsg').textContent = 'Mã QR này là số thẻ. Hãy dùng mã QR nhận tiền bằng số tài khoản.'; return false; }
+  const bank = BANKS.find(b => b[0] === info.bin);
+  if (!bank) { $('scanMsg').textContent = `Ngân hàng (mã ${info.bin}) chưa có trong danh sách.`; return false; }
+  const list = scanTarget.list === 'people' ? store.people : state.members;
+  const x = list.find(i => i.id === scanTarget.id);
+  if (!x) { stopScanner(); return true; }
+  x.bank = info.bin; x.account = info.account;
+  const p = scanTarget.list === 'people' ? x : personOf(x);
+  if (p) { p.bank = x.bank; p.account = x.account; propagatePerson(p); }
+  stopScanner();
+  commit();
+  toast(`Đã điền ${bank[1]} · ${info.account} cho ${x.name}`);
+  return true;
+}
+$('scanFile').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  $('scanMsg').textContent = '';
+  try {
+    const img = await createImageBitmap(f);
+    const k = Math.min(1, 1200 / Math.max(img.width, img.height));
+    const text = await decodeQR(img, Math.round(img.width * k), Math.round(img.height * k));
+    if (!text) $('scanMsg').textContent = 'Không tìm thấy mã QR trong ảnh này.';
+    else applyScan(text);
+  } catch (err) { console.warn(err); $('scanMsg').textContent = 'Không đọc được ảnh.'; }
+});
+$('scanClose').addEventListener('click', stopScanner);
+$('scanDialog').addEventListener('cancel', e => { e.preventDefault(); stopScanner(); });
+for (const list of ['members', 'people']) $(list).addEventListener('click', e => {
+  if (!e.target.closest('[data-scan]')) return;
+  openScanner({ list, id: e.target.closest('.member').dataset.id });
+});
+
+// ---------- Mở app ngân hàng (deeplink VietQR: dl.vietqr.io) ----------
+const APP_KEY = 'sharebill-bankapp';
+const savedApp = () => { try { const id = localStorage.getItem(APP_KEY); return BANK_APPS.some(a => a[0] === id) ? id : null; } catch (e) { return null; } };
+const appName = id => (BANK_APPS.find(a => a[0] === id) || [, ''])[1];
+function appButtons(data) {
+  if (!matchMedia('(pointer: coarse)').matches) return '';   // chỉ có ý nghĩa trên điện thoại
+  const app = savedApp();
+  return `<button class="ghost" data-act="openApp" ${data}>🏦 ${app ? 'Mở ' + esc(appName(app)) : 'Mở app ngân hàng'}</button>` +
+    (app ? `<button class="x" data-act="pickApp" ${data}>đổi app</button>` : '');
+}
+function openBankApp(appId, t) {
+  const to = state.members.find(m => m.id === t.to), from = state.members.find(m => m.id === t.from);
+  const acc = to.account.replace(/\s/g, ''), code = (BANKS.find(b => b[0] === to.bank) || [])[2];
+  const url = `https://dl.vietqr.io/pay?app=${appId}&ba=${encodeURIComponent(acc)}@${code}` +
+    `&am=${t.amount}&tn=${encodeURIComponent(noAccent(transferInfo(from)))}`;
+  // Link chỉ mở app, không chắc app điền sẵn thông tin: luôn copy sẵn số tài khoản để dán
+  navigator.clipboard?.writeText(acc).catch(() => {});
+  toast(`Đã copy STK ${acc} (${bankName(to.bank)}). Chuyển ${fmt(t.amount)}`);
+  if (!window.open(url, '_blank')) location.href = url;
+}
+function pickApp(t) {
+  $('appDialog').dataset.t = JSON.stringify(t);
+  $('appSearch').value = '';
+  renderApps();
+  $('appDialog').showModal();
+}
+function renderApps() {
+  const q = nameKey($('appSearch').value);
+  $('appList').innerHTML = BANK_APPS.filter(a => !q || nameKey(a[1]).includes(q) || a[0].includes(q))
+    .map(([id, name]) => `<button type="button" data-app="${id}">🏦 ${esc(name)}</button>`)
+    .join('') || '<div class="empty">Không tìm thấy app</div>';
+}
+$('appSearch').addEventListener('input', renderApps);
+$('appList').addEventListener('click', e => {
+  const id = e.target.closest('[data-app]')?.dataset.app;
+  if (!id) return;
+  try { localStorage.setItem(APP_KEY, id); } catch (err) {}
+  $('appDialog').close();
+  render();
+  openBankApp(id, JSON.parse($('appDialog').dataset.t));
+});
+$('appClose').addEventListener('click', () => $('appDialog').close());
 
 // ---------- "Bạn là ai trong bill?" (lưu trên máy, không đồng bộ) ----------
 const meOf = () => state.members.find(m => m.id === store.me[state.id]);
@@ -1577,6 +1825,7 @@ $('members').addEventListener('change', e => {
 });
 
 // ---------- Danh bạ ----------
+$('dirSearch').addEventListener('input', renderPeople);
 $('dirFilter').addEventListener('click', e => {
   const b = e.target.closest('[data-filter]');
   if (!b) return;
@@ -1762,6 +2011,11 @@ $('btnAll').addEventListener('click', () => {
 $('transfers').addEventListener('click', e => {
   const d = e.target.dataset;
   if (d.act === 'qrImg') return downloadQR(d.from, d.to, +d.amount);
+  if (d.act === 'openApp' || d.act === 'pickApp') {
+    const t = { from: d.from, to: d.to, amount: +d.amount };
+    const app = d.act === 'openApp' && savedApp();
+    return app ? openBankApp(app, t) : pickApp(t);
+  }
   if (d.act !== 'pay') return;
   state.payments.push({ id: uid(), from: d.from, to: d.to, amount: +d.amount, at: Date.now() });
   commit();

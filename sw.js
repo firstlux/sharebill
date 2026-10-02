@@ -1,8 +1,8 @@
 // Cache app để dùng offline
-const CACHE = 'sharebill-v4';
+const CACHE = 'sharebill-v5';
 const ASSETS = [
   './', 'index.html', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png',
-  'qrcode.min.js', 'firebase-config.js',
+  'qrcode.min.js', 'jsQR.min.js', 'firebase-config.js',
 ];
 
 self.addEventListener('install', e => {
