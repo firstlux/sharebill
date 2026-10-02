@@ -29,10 +29,22 @@
   body { margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .wrap { max-width: 880px; margin: 0 auto; padding: 20px 16px 60px; }
-  header { margin-bottom: 16px; }
-  header h1 { margin: 0; font-size: 22px; }
-  header .row + .row { margin-top: 8px; }
-  #billName { font-size: 16px; font-weight: 600; }
+  header { margin-bottom: 12px; }
+  header .top { flex-wrap: nowrap; }
+  header .logo { font-size: 24px; flex: none; }
+  #billName { font-size: 20px; font-weight: 700; background: transparent; border-color: transparent; padding: 6px 8px; }
+  #billName:hover { border-color: var(--line); }
+  .icon-btn { position: relative; flex: none; width: 40px; height: 40px; padding: 0; display: inline-flex;
+    align-items: center; justify-content: center; font-size: 18px; font-weight: 400; cursor: pointer;
+    background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 10px; }
+  button.icon-btn:hover, .icon-btn:hover { background: var(--chip); }
+  .picker select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+  .badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px;
+    border-radius: 999px; background: var(--primary); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; }
+  @media (prefers-color-scheme: dark) { .badge { color: #04201d; } }
+  header .actions { margin-top: 6px; }
+  header .actions button { padding: 6px 10px; font-size: 14px; }
+  header .actions #btnDelete { margin-left: auto; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
     padding: 16px; margin-bottom: 16px; }
   .card h2 { margin: 0 0 12px; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
@@ -89,7 +101,6 @@
   .tabs .count { font-weight: 400; opacity: .8; }
   .linklike { background: none; color: var(--primary); padding: 0; font-weight: 600; }
   .linklike:hover { background: none; text-decoration: underline; }
-  .live-row:not(:has(:not([hidden]))) { display: none; }
   .live-status { font-size: 13px; color: var(--muted); }
   .live-status b { color: var(--pos); font-weight: 600; }
   .live-status.off b { color: var(--neg); }
@@ -100,6 +111,7 @@
     opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: 1; }
   @media (max-width: 560px) {
+    #billName { font-size: 18px; }
     .exp-form > * { flex: 1 1 100%; }
     .hide-sm { display: none; }
   }
@@ -108,19 +120,19 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="row">
-      <h1>🧾 ShareBill</h1>
-      <select id="billSelect" class="grow" title="Chọn bill"></select>
-      <button class="ghost" id="btnNew">+ Bill mới</button>
+    <div class="row top">
+      <span class="logo" aria-hidden="true">🧾</span>
+      <input id="billName" class="grow" placeholder="Tên bill, vd: Đi Đà Lạt" aria-label="Tên bill">
+      <label class="icon-btn picker" title="Chọn bill khác">📂<span class="badge" id="billCount" hidden></span>
+        <select id="billSelect" aria-label="Chọn bill khác"></select>
+      </label>
+      <button class="icon-btn" id="btnNew" title="Bill mới" aria-label="Bill mới">＋</button>
     </div>
-    <div class="row">
-      <input id="billName" class="grow" placeholder="Tên bill, vd: Đi Đà Lạt 09/2026">
+    <div class="row actions">
       <button class="ghost" id="btnShare" title="Copy link chia sẻ bill">🔗 Copy link</button>
-      <button class="ghost" id="btnDelete">Xoá bill</button>
-    </div>
-    <div class="row live-row">
       <button class="ghost" id="btnLive" hidden title="Đưa bill lên mạng để cả nhóm cùng sửa">☁️ Bật sửa chung</button>
       <span id="liveStatus" class="live-status" hidden></span>
+      <button class="x" id="btnDelete" title="Xoá bill">Xoá bill</button>
     </div>
   </header>
 
@@ -494,6 +506,8 @@ const billLabel = b => `${b.name || 'Bill chưa đặt tên'} · ${new Date(b.cr
 function renderBills() {
   $('billSelect').innerHTML = store.bills.map(b =>
     `<option value="${b.id}" ${b.id === state.id ? 'selected' : ''}>${esc(billLabel(b))}</option>`).join('');
+  $('billCount').hidden = store.bills.length < 2;
+  $('billCount').textContent = store.bills.length;
 }
 
 // Ô chia tiền theo cách chia đang chọn; giữ lại giá trị đã nhập khi render lại
