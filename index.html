@@ -93,7 +93,14 @@
   .ghead { margin: 14px 0 8px; font-size: 14px; display: flex; align-items: center; gap: 6px; }
   .ghead:first-child { margin-top: 0; }
   .member .row.top-line { flex-wrap: nowrap; }
-  .member select[data-f="group"] { padding: 4px 8px; font-size: 13px; max-width: 45%; }
+  .gtoggles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .gtoggles .tag { background: var(--chip); border-radius: 999px; padding: 2px 10px; }
+  .member button.gt, .dir-filter button { background: transparent; color: var(--muted); border: 1px dashed var(--line);
+    border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 500; }
+  .member button.gt:hover, .dir-filter button:hover { background: var(--chip); color: var(--text); }
+  .member button.gt.on, .dir-filter button.on { background: var(--chip); color: var(--primary); border: 1px solid var(--primary); font-weight: 700; }
+  .dir-filter { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .dir-filter:empty { display: none; }
   #groupPicks button.x { color: var(--primary); }
   tr.group-row td { font-weight: 700; background: var(--chip); }
   tr.in-group td:first-child { padding-left: 20px; }
@@ -249,6 +256,7 @@
       <select id="personGroup" title="Nhóm" hidden></select>
       <button>Thêm</button>
     </form>
+    <div id="dirFilter" class="dir-filter"></div>
     <div id="people"></div>
   </section>
 
@@ -400,6 +408,7 @@ function normalize(b) {
   b.id ||= uid(); b.created ||= Date.now(); b.name ||= ''; b.date ||= isoDate(b.created);
   b.members ||= []; b.expenses ||= []; b.payments ||= []; b.groups ||= [];
   b.expenses.forEach(e => { e.mode ||= 'equal'; e.split ||= []; });
+  b.members.forEach(m => { if ('group' in m) setGroups(m, groupsOf(m)); });   // 1 nhóm -> nhiều nhóm
   return b;
 }
 function selectBill(id) {
@@ -415,6 +424,7 @@ function load() {
     else { const old = localStorage.getItem(OLD_KEY); if (old) store.bills = [JSON.parse(old)]; }
   } catch (e) {}
   store.bills = (store.bills || []).map(normalize);
+  (store.people || []).forEach(p => setGroups(p, groupsOf(p)));
   // billId -> id thành viên "là tôi" trên máy này ('' = không hỏi / chỉ xem).
   // Bill đã có sẵn trên máy (tự tạo) thì không hỏi; chỉ hỏi bill mở từ link.
   if (!store.me) { store.me = {}; store.bills.forEach(b => store.me[b.id] = ''); }
@@ -493,6 +503,14 @@ function joinDir(id) {
 // Thành viên trong bill là bản sao của người trong danh bạ, liên kết qua pid (mặc định = id).
 // Nhóm trong bill cũng là bản sao của nhóm danh bạ, liên kết qua pid.
 const pidOf = x => x.pid || x.id;
+// Một người có thể thuộc nhiều nhóm: groups = [id nhóm]. Dữ liệu cũ dùng group (1 nhóm), vẫn đọc được.
+const groupsOf = x => x.groups || (x.group ? [x.group] : []);
+const inGroup = (x, gid) => groupsOf(x).includes(gid);
+function setGroups(x, ids) {
+  ids = [...new Set(ids.filter(Boolean))];
+  if (ids.length) x.groups = ids; else delete x.groups;   // không lưu mảng rỗng (Firebase sẽ bỏ đi)
+  delete x.group;
+}
 const nameKey = s => noAccent(s).toLowerCase();
 const personOf = m => store.people.find(p => p.id === pidOf(m));
 
@@ -508,9 +526,10 @@ function seedDirectory() {
     }
     for (const m of b.members) {
       let P = store.people.find(x => nameKey(x.name) === nameKey(m.name));
-      const bg = b.groups.find(x => x.id === m.group);
-      if (!P) store.people.push(P = { id: m.id, name: m.name, bank: m.bank || '', account: m.account || '', group: bg ? pidOf(bg) : '' });
+      const gids = groupsOf(m).map(id => b.groups.find(x => x.id === id)).filter(Boolean).map(pidOf);
+      if (!P) store.people.push(P = { id: m.id, name: m.name, bank: m.bank || '', account: m.account || '' });
       else if (!P.account && m.account) { P.bank = m.bank; P.account = m.account; }
+      setGroups(P, [...groupsOf(P), ...gids]);
       if (P.id !== m.id) m.pid = P.id;
     }
   }
@@ -525,15 +544,19 @@ function billGroupFor(b, gid) {
 }
 // Đẩy thông tin người trong danh bạ xuống mọi bill có người đó
 function propagatePerson(p) {
-  for (const b of store.bills) for (const m of b.members) if (pidOf(m) === p.id)
-    Object.assign(m, { name: p.name, bank: p.bank, account: p.account, group: billGroupFor(b, p.group) });
+  for (const b of store.bills) for (const m of b.members) if (pidOf(m) === p.id) {
+    Object.assign(m, { name: p.name, bank: p.bank, account: p.account });
+    setGroups(m, groupsOf(p).map(gid => billGroupFor(b, gid)));
+  }
 }
 function propagateGroup(g) {
   for (const b of store.bills) for (const bg of b.groups) if (pidOf(bg) === g.id) bg.name = g.name;
 }
+// Có chọn nhóm thì thêm người (mới hoặc đã có) vào nhóm đó
 function findOrCreatePerson(name, group) {
   let p = store.people.find(x => nameKey(x.name) === nameKey(name));
-  if (!p) store.people.push(p = { id: uid(), name, bank: '', account: '', group });
+  if (!p) store.people.push(p = { id: uid(), name, bank: '', account: '' });
+  if (group && !inGroup(p, group)) { setGroups(p, [...groupsOf(p), group]); propagatePerson(p); }
   return p;
 }
 function addPeopleToBill(ids) {
@@ -541,7 +564,9 @@ function addPeopleToBill(ids) {
   for (const id of ids) {
     const p = store.people.find(x => x.id === id);
     if (!p || state.members.some(m => pidOf(m) === id)) continue;
-    state.members.push({ id: p.id, name: p.name, bank: p.bank, account: p.account, group: billGroupFor(state, p.group) });
+    const m = { id: p.id, name: p.name, bank: p.bank, account: p.account };
+    setGroups(m, groupsOf(p).map(gid => billGroupFor(state, gid)));
+    state.members.push(m);
     n++;
   }
   return n;
@@ -761,8 +786,10 @@ function mergeLocalDir(people, groups) {
   let n = 0;
   for (const p of people) {
     const P = store.people.find(x => x.id === p.id || nameKey(x.name) === nameKey(p.name));
-    if (!P) { store.people.push({ ...p, group: gmap[p.group] || '' }); n++; continue; }
+    const gids = groupsOf(p).map(g => gmap[g]);
+    if (!P) { const np = { ...p }; setGroups(np, gids); store.people.push(np); n++; continue; }
     if (!P.account && p.account) { P.bank = p.bank; P.account = p.account; }
+    setGroups(P, [...groupsOf(P), ...gids]);   // gộp nhóm của cả hai máy
     if (P.id !== p.id) for (const b of store.bills) for (const m of b.members) if (pidOf(m) === p.id) m.pid = P.id;
   }
   for (const [from, to] of Object.entries(gmap)) if (from !== to)
@@ -1016,7 +1043,7 @@ function renderSplit() {
   $('btnAll').style.display = mode === 'equal' ? '' : 'none';
   // Chọn nhanh cả nhóm (chỉ khi chia đều)
   $('groupPicks').innerHTML = mode !== 'equal' ? '' : state.groups
-    .filter(g => state.members.some(m => m.group === g.id))
+    .filter(g => state.members.some(m => inGroup(m, g.id)))
     .map(g => `<button type="button" class="x" data-pick="${g.id}" title="Chỉ chọn nhóm này">👥 ${esc(g.name)}</button>`).join('');
 
   if (!state.members.length) {
@@ -1024,13 +1051,13 @@ function renderSplit() {
     return;
   }
   if (mode === 'equal') {
-    box.innerHTML = '<div class="chips">' + groupedMembers().flatMap(x => x.list).map(m =>
+    box.innerHTML = '<div class="chips">' + orderedMembers().map(m =>
       `<label><input type="checkbox" data-m="${m.id}" ${prev[m.id] === false ? '' : 'checked'}>${esc(m.name)}</label>`
     ).join('') + '</div>';
     return;
   }
   const shares = mode === 'shares';
-  box.innerHTML = groupedMembers().flatMap(x => x.list).map(m => `
+  box.innerHTML = orderedMembers().map(m => `
     <div class="sp"><span>${esc(m.name)}</span>
       <input data-m="${m.id}" inputmode="${shares ? 'decimal' : 'numeric'}" autocomplete="off"
         placeholder="${shares ? '0' : 'vd: 150k'}" value="${esc(prev[m.id] ?? (shares ? '1' : ''))}">
@@ -1054,14 +1081,18 @@ function updateHint() {
 }
 
 // Xếp theo nhóm: [{g: nhóm | null, list}]; withEmpty: giữ cả nhóm chưa có ai
+// Một người thuộc nhiều nhóm thì có mặt ở mỗi nhóm đó
 function groupBy(groups, items, withEmpty) {
   const known = new Set(groups.map(g => g.id));
-  const out = groups.map(g => ({ g, list: items.filter(m => m.group === g.id) }));
-  out.push({ g: null, list: items.filter(m => !known.has(m.group)) });
+  const out = groups.map(g => ({ g, list: items.filter(m => inGroup(m, g.id)) }));
+  out.push({ g: null, list: items.filter(m => !groupsOf(m).some(id => known.has(id))) });
   return out.filter(x => x.list.length || (withEmpty && x.g));
 }
+// Xếp theo nhóm nhưng mỗi người chỉ một lần
+const ordered = (groups, items) => [...new Set(groupBy(groups, items).flatMap(x => x.list))];
 const groupedMembers = withEmpty => groupBy(state.groups, state.members, withEmpty);
-const groupMemberIds = gid => state.members.filter(m => m.group === gid).map(m => m.id);
+const orderedMembers = () => ordered(state.groups, state.members);
+const groupMemberIds = gid => state.members.filter(m => inGroup(m, gid)).map(m => m.id);
 
 function splitText(e) {
   const n = id => esc(nameOf(id));
@@ -1166,8 +1197,6 @@ function renderPeople() {
         <select data-f="bank" style="flex:1 1 160px">${bankOpts}</select>
         <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 160px" value="${esc(x.account || '')}">
       </div>`;
-  const head = (g, n) => `<h3 class="ghead">${g ? '👥 ' + esc(g.name) : 'Chưa xếp nhóm'} <span class="muted">· ${n} người</span></h3>`;
-
   // Nhóm danh bạ + ô chọn nhóm cho người mới
   $('groupChips').innerHTML = store.groups.map(g => `
     <span class="gchip" data-id="${g.id}">👥 ${esc(g.name)}
@@ -1187,50 +1216,58 @@ function renderPeople() {
     ? '<span class="muted">Danh bạ trống. Nhập người mới bên dưới, họ sẽ được lưu luôn vào danh bạ.</span>'
     : !notIn.length ? '<span class="muted">Mọi người trong danh bạ đã có trong bill.</span>'
     : store.groups.map(g => {
-        const k = notIn.filter(p => p.group === g.id).length;
+        const k = notIn.filter(p => inGroup(p, g.id)).length;
         return k ? `<button type="button" class="grp" data-addgroup="${g.id}">+ 👥 ${esc(g.name)} (${k})</button>` : '';
       }).join('') +
-      groupBy(store.groups, notIn).flatMap(x => x.list)
+      ordered(store.groups, notIn)
         .map(p => `<button type="button" data-addperson="${p.id}">+ ${esc(p.name)}</button>`).join('');
 
-  // Thành viên của bill
-  const billGroups = groupedMembers(), showHeads = billGroups.some(x => x.g);
-  const billCard = m => {
-    const bg = state.groups.find(g => g.id === m.group);
-    return `
+  // Thành viên của bill: nhãn các nhóm của từng người
+  const tags = (x, groups) => groupsOf(x).map(id => groups.find(g => g.id === id)).filter(Boolean)
+    .map(g => `<span class="tag">👥 ${esc(g.name)}</span>`).join('');
+  const billCard = m => `
     <div class="member" data-id="${m.id}">
       <div class="row top-line">
         <span class="name">${esc(m.name)}${m.id === store.me[state.id] ? ' <span class="tag">(bạn)</span>' : ''}</span>
-        ${bg && !showHeads ? `<span class="tag">👥 ${esc(bg.name)}</span>` : ''}
         <button class="x" data-act="renameMember" title="Đổi tên">✎</button>
         ${personOf(m) ? '' : '<button class="x" data-act="saveDir" title="Lưu người này vào danh bạ của bạn">📇 Lưu danh bạ</button>'}
         <button class="x" data-act="delMember" title="Bỏ khỏi bill">✕</button>
-      </div>${bankRow(m)}
+      </div>
+      ${groupsOf(m).length ? `<div class="gtoggles">${tags(m, state.groups)}</div>` : ''}${bankRow(m)}
     </div>`;
-  };
   $('members').innerHTML = !state.members.length ? '<div class="empty">Bill chưa có ai. Chọn từ danh bạ ở trên.</div>'
-    : billGroups.map(({ g, list }) => (showHeads ? head(g, list.length) : '') + list.map(billCard).join('')).join('');
+    : orderedMembers().map(billCard).join('');
   state.members.forEach(m => $('members').querySelector(`[data-id="${m.id}"] [data-f=bank]`).value = m.bank || '');
 
-  // Danh bạ
+  // Danh bạ: lọc theo nhóm; mỗi người có nút bật/tắt từng nhóm
+  if (dirFilter && dirFilter !== NO_GROUP && !store.groups.some(g => g.id === dirFilter)) dirFilter = '';
+  const known = new Set(store.groups.map(g => g.id));
+  const noGroup = p => !groupsOf(p).some(id => known.has(id));
+  const filters = [['', 'Tất cả', store.people.length],
+    ...store.groups.map(g => [g.id, g.name, store.people.filter(p => inGroup(p, g.id)).length]),
+    [NO_GROUP, 'Chưa có nhóm', store.people.filter(noGroup).length]];
+  $('dirFilter').innerHTML = !store.groups.length ? '' : filters.map(([id, name, n]) =>
+    `<button type="button" class="${dirFilter === id ? 'on' : ''}" data-filter="${id}">${esc(name)} (${n})</button>`).join('');
+  const shown = ordered(store.groups, store.people)
+    .filter(p => !dirFilter || (dirFilter === NO_GROUP ? noGroup(p) : inGroup(p, dirFilter)));
   const dirCard = p => `
     <div class="member" data-id="${p.id}">
       <div class="row top-line">
         <span class="name">${esc(p.name)}</span>
-        ${store.groups.length ? `<select data-f="group" title="Nhóm">${groupOpts}</select>` : ''}
         <button class="x" data-act="renamePerson" title="Đổi tên">✎</button>
         <button class="x" data-act="delPerson" title="Xoá khỏi danh bạ">✕</button>
-      </div>${bankRow(p)}
+      </div>
+      ${store.groups.length ? `<div class="gtoggles">${store.groups.map(g =>
+        `<button type="button" class="gt ${inGroup(p, g.id) ? 'on' : ''}" data-toggle="${g.id}"
+          title="${inGroup(p, g.id) ? 'Bỏ khỏi' : 'Thêm vào'} nhóm ${esc(g.name)}">${inGroup(p, g.id) ? '✓ ' : '+ '}${esc(g.name)}</button>`).join('')}</div>` : ''}
+      ${bankRow(p)}
     </div>`;
   $('people').innerHTML = !store.people.length ? '<div class="empty">Danh bạ trống</div>'
-    : groupBy(store.groups, store.people, true).map(({ g, list }) => (store.groups.length ? head(g, list.length) : '') +
-        (list.map(dirCard).join('') || '<div class="muted" style="margin-bottom:8px">Chưa có ai, chọn nhóm ở từng người.</div>')).join('');
-  store.people.forEach(p => {
-    const el = $('people').querySelector(`[data-id="${p.id}"]`);
-    el.querySelector('[data-f=bank]').value = p.bank || '';
-    if (store.groups.length) el.querySelector('[data-f=group]').value = store.groups.some(g => g.id === p.group) ? p.group : '';
-  });
+    : shown.map(dirCard).join('') || '<div class="empty">Không có ai trong nhóm này</div>';
+  shown.forEach(p => $('people').querySelector(`[data-id="${p.id}"] [data-f=bank]`).value = p.bank || '');
 }
+const NO_GROUP = '__none';
+let dirFilter = '';
 
 // ---------- "Bạn là ai trong bill?" (lưu trên máy, không đồng bộ) ----------
 const meOf = () => state.members.find(m => m.id === store.me[state.id]);
@@ -1260,7 +1297,7 @@ $('whoNewForm').addEventListener('submit', e => {
   e.preventDefault();
   const name = $('whoNewName').value.trim();
   if (!name) return;
-  const m = { id: uid(), name, bank: '', account: '', group: '' };
+  const m = { id: uid(), name, bank: '', account: '' };
   state.members.push(m);
   commit();
   setMe(m.id);
@@ -1478,7 +1515,7 @@ $('addFromDir').addEventListener('click', e => {
   const b = e.target.closest('[data-addgroup], [data-addperson]');
   if (!b) return;
   const gid = b.dataset.addgroup;
-  const n = addPeopleToBill(gid ? store.people.filter(p => p.group === gid).map(p => p.id) : [b.dataset.addperson]);
+  const n = addPeopleToBill(gid ? store.people.filter(p => inGroup(p, gid)).map(p => p.id) : [b.dataset.addperson]);
   commit();
   if (gid) toast(`Đã thêm ${n} người vào bill`);
 });
@@ -1504,10 +1541,14 @@ $('members').addEventListener('click', e => {
       propagatePerson(same);
       toast(`Đã liên kết với “${same.name}” trong danh bạ`);
     } else {
-      const bg = state.groups.find(g => g.id === m.group);
-      let gid = '';
-      if (bg) { gid = pidOf(bg); if (!store.groups.some(g => g.id === gid)) store.groups.push({ id: gid, name: bg.name }); }
-      store.people.push({ id: pidOf(m), name: m.name, bank: m.bank || '', account: m.account || '', group: gid });
+      const gids = groupsOf(m).map(id => state.groups.find(g => g.id === id)).filter(Boolean).map(bg => {
+        const gid = pidOf(bg);
+        if (!store.groups.some(g => g.id === gid)) store.groups.push({ id: gid, name: bg.name });
+        return gid;
+      });
+      const np = { id: pidOf(m), name: m.name, bank: m.bank || '', account: m.account || '' };
+      setGroups(np, gids);
+      store.people.push(np);
       toast(`Đã lưu “${m.name}” vào danh bạ`);
     }
     return commit();
@@ -1536,6 +1577,14 @@ $('members').addEventListener('change', e => {
 });
 
 // ---------- Danh bạ ----------
+$('dirFilter').addEventListener('click', e => {
+  const b = e.target.closest('[data-filter]');
+  if (!b) return;
+  dirFilter = b.dataset.filter;
+  renderPeople();
+  // Người thêm tiếp theo vào nhóm đang lọc
+  if (dirFilter && dirFilter !== NO_GROUP) $('personGroup').value = dirFilter;
+});
 $('personForm').addEventListener('submit', e => {
   e.preventDefault();
   const names = splitNames($('personName').value);
@@ -1555,6 +1604,13 @@ $('people').addEventListener('change', e => {
   commit();
 });
 $('people').addEventListener('click', e => {
+  const gid = e.target.closest('[data-toggle]')?.dataset.toggle;
+  if (gid) {
+    const p = store.people.find(x => x.id === e.target.closest('.member').dataset.id);
+    setGroups(p, inGroup(p, gid) ? groupsOf(p).filter(x => x !== gid) : [...groupsOf(p), gid]);
+    propagatePerson(p);
+    return commit();
+  }
   const act = e.target.dataset.act;
   if (!act) return;
   const p = store.people.find(x => x.id === e.target.closest('.member').dataset.id);
@@ -1686,7 +1742,7 @@ $('groupChips').addEventListener('click', e => {
   } else if (act === 'delGroup') {
     if (!confirm(`Xoá nhóm “${g.name}”? Mọi người trong nhóm vẫn còn trong danh bạ, chỉ bỏ xếp nhóm.`)) return;
     store.groups = store.groups.filter(x => x !== g);
-    store.people.forEach(p => { if (p.group === g.id) { p.group = ''; propagatePerson(p); } });
+    store.people.forEach(p => { if (inGroup(p, g.id)) { setGroups(p, groupsOf(p).filter(x => x !== g.id)); propagatePerson(p); } });
   }
   commit();
 });
