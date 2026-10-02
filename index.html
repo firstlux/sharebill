@@ -1428,9 +1428,21 @@ $('btnShare').addEventListener('click', async () => {
     hash = btoa(unescape(encodeURIComponent(JSON.stringify(b)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   }
   const url = location.origin + location.pathname + '#' + hash;
+  // Điện thoại: mở menu chia sẻ của máy (Zalo, Messenger…); máy tính: copy link
+  if (canShare()) {
+    const text = `🧾 ${state.name || 'Bill'} · ${viDate(state.date)}\nXem phần của bạn và quét QR chuyển khoản:`;
+    try { await navigator.share({ title: state.name || 'ShareBill', text, url }); return; }
+    catch (e) {
+      if (e.name === 'AbortError') return;
+      // Chờ bật sửa chung quá lâu nên trình duyệt không cho mở menu chia sẻ nữa
+      if (e.name === 'NotAllowedError') return toast('Đã bật sửa chung, bấm “Chia sẻ” lần nữa để gửi');
+    }
+  }
   try { await navigator.clipboard.writeText(url); toast('Đã copy link bill'); }
   catch { prompt('Copy link này:', url); }
 });
+function canShare() { return !!navigator.share && matchMedia('(pointer: coarse)').matches; }
+if (canShare()) $('btnShare').textContent = '📤 Chia sẻ';
 
 let tt;
 function toast(msg) {
