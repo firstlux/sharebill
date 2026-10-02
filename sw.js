@@ -1,8 +1,8 @@
 // Cache app shell để dùng offline
-const CACHE = 'sharebill-v1';
+const CACHE = 'sharebill-v2';
 const ASSETS = [
   './', 'index.html', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png',
-  'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js',
+  'qrcode.min.js',
 ];
 
 self.addEventListener('install', e => {
