@@ -1,8 +1,8 @@
-// Cache app shell để dùng offline
-const CACHE = 'sharebill-v3';
+// Cache app để dùng offline
+const CACHE = 'sharebill-v4';
 const ASSETS = [
   './', 'index.html', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png',
-  'qrcode.min.js',
+  'qrcode.min.js', 'firebase-config.js',
 ];
 
 self.addEventListener('install', e => {
@@ -15,15 +15,20 @@ self.addEventListener('activate', e => {
     .then(() => self.clients.claim()));
 });
 
-// Network-first cho trang, cache-first cho phần còn lại
+const put = (req, res) => { if (res.ok) { const c = res.clone(); caches.open(CACHE).then(x => x.put(req, c)); } return res; };
+
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
-  if (e.request.mode === 'navigate') {
-    e.respondWith(fetch(e.request).then(r => {
-      caches.open(CACHE).then(c => c.put('index.html', r.clone()));
-      return r;
-    }).catch(() => caches.match('index.html')));
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  // File của app: lấy bản mới từ mạng, mất mạng thì dùng bản đã cache
+  if (url.origin === location.origin) {
+    e.respondWith(fetch(req).then(r => put(req, r))
+      .catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('index.html'))));
     return;
   }
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+  // Thư viện Firebase (gstatic) có version cố định: cache-first
+  if (url.hostname === 'www.gstatic.com') {
+    e.respondWith(caches.match(req).then(r => r || fetch(req).then(r => put(req, r))));
+  }
 });

@@ -10,6 +10,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
+<script src="firebase-config.js"></script>
 <script src="qrcode.min.js"></script>
 <style>
   :root {
@@ -79,6 +80,10 @@
   .paid .who { flex: 1; color: var(--muted); }
   .paid .who b { color: var(--pos); }
   .done-all { text-align: center; padding: 12px; font-weight: 600; color: var(--pos); }
+  .live-row:not(:has(:not([hidden]))) { display: none; }
+  .live-status { font-size: 13px; color: var(--muted); }
+  .live-status b { color: var(--pos); font-weight: 600; }
+  .live-status.off b { color: var(--neg); }
   .empty { color: var(--muted); text-align: center; padding: 12px; }
   .total { font-weight: 700; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
@@ -101,8 +106,12 @@
     </div>
     <div class="row">
       <input id="billName" class="grow" placeholder="Tên bill, vd: Đi Đà Lạt 09/2026">
-      <button class="ghost" id="btnShare" title="Copy link chứa toàn bộ dữ liệu bill">🔗 Copy link</button>
+      <button class="ghost" id="btnShare" title="Copy link chia sẻ bill">🔗 Copy link</button>
       <button class="ghost" id="btnDelete">Xoá bill</button>
+    </div>
+    <div class="row live-row">
+      <button class="ghost" id="btnLive" hidden title="Đưa bill lên mạng để cả nhóm cùng sửa">☁️ Bật sửa chung</button>
+      <span id="liveStatus" class="live-status" hidden></span>
     </div>
   </header>
 
@@ -208,6 +217,7 @@ function normalize(b) {
 function selectBill(id) {
   state = store.bills.find(b => b.id === id) || store.bills[0];
   store.current = state.id;
+  connectLive();
 }
 
 function load() {
@@ -218,7 +228,15 @@ function load() {
   } catch (e) {}
   store.bills = (store.bills || []).map(normalize);
 
-  if (location.hash.length > 1) {
+  const liveId = location.hash.match(/^#b=([\w-]{16,})$/);
+  if (liveId) {
+    // Link bill sửa chung: dữ liệu sẽ được tải từ Firebase
+    const id = liveId[1];
+    if (!store.bills.some(b => b.id === id))
+      store.bills.unshift({ ...newBill(), id, name: 'Đang tải…', online: true });
+    store.current = id;
+    history.replaceState(null, '', location.pathname);
+  } else if (location.hash.length > 1) {
     try {
       const json = decodeURIComponent(escape(atob(location.hash.slice(1).replace(/-/g,'+').replace(/_/g,'/'))));
       const b = normalize(JSON.parse(json));
@@ -234,7 +252,146 @@ function load() {
   save();
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {} }
-function commit() { save(); render(); }
+function commit() { save(); render(); pushLive(); }
+
+// ---------- Sửa chung (Firebase Realtime Database) ----------
+// Mỗi bill online nằm ở bills/{id}; thành viên / khoản chi / thanh toán lưu dạng map theo id
+// để nhiều người sửa cùng lúc mà không ghi đè nhau (chỉ ghi phần thay đổi).
+const FB_VER = '12.3.0';
+const LIVE_KEY = 'sharebill-sync-';
+const COLS = ['members', 'expenses', 'payments'];
+let fb = null;
+let live = { id: null, unsub: [], last: null };
+
+const hasFirebase = () => !!(window.FIREBASE_CONFIG && FIREBASE_CONFIG.databaseURL);
+async function firebase() {
+  if (fb) return fb;
+  const [app, db] = await Promise.all([
+    import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app.js`),
+    import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-database.js`),
+  ]);
+  fb = { ...db, db: db.getDatabase(app.initializeApp(FIREBASE_CONFIG)) };
+  return fb;
+}
+const longId = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(12))))
+  .replace(/\+/g, '-').replace(/\//g, '_');
+
+// JSON với key sắp xếp, để so sánh dữ liệu local và dữ liệu Firebase trả về
+const stable = v => Array.isArray(v) ? '[' + v.map(stable).join(',') + ']'
+  : v && typeof v === 'object' ? '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}'
+  : JSON.stringify(v);
+
+function toRemote(b) {
+  const r = { name: b.name, created: b.created };
+  let t = Date.now();
+  for (const c of COLS) {
+    r[c] = {};
+    b[c].forEach(x => { x.o ??= t++; r[c][x.id] = x; });   // o: giữ thứ tự hiển thị
+  }
+  return r;
+}
+function fromRemote(val) {
+  const b = { name: val.name || '', created: val.created || Date.now() };
+  for (const c of COLS) b[c] = Object.values(val[c] || {}).sort((x, y) => x.o - y.o);
+  return b;
+}
+// Phẳng hoá thành {đường dẫn: JSON} để tính phần thay đổi
+function flatten(r) {
+  const f = { name: stable(r.name), created: stable(r.created) };
+  for (const c of COLS) for (const id in r[c]) f[`${c}/${id}`] = stable(r[c][id]);
+  return f;
+}
+function diff(cur, last) {
+  const u = {};
+  for (const k in cur) if (cur[k] !== last[k]) u[k] = JSON.parse(cur[k]);
+  for (const k in last) if (!(k in cur)) u[k] = null;
+  return u;
+}
+function setLast(id, f) {
+  live.last = f;
+  try { localStorage.setItem(LIVE_KEY + id, JSON.stringify(f)); } catch (e) {}
+}
+
+function pushLive() {
+  if (!state.online || live.id !== state.id || !live.last || !fb) return;
+  const cur = flatten(toRemote(state));
+  const u = diff(cur, live.last);
+  if (!Object.keys(u).length) return;
+  setLast(state.id, cur);
+  fb.update(fb.ref(fb.db, 'bills/' + state.id), u).catch(e => { console.warn(e); toast('Không lưu được lên mạng'); });
+}
+
+async function connectLive() {
+  live.unsub.forEach(f => f()); live.unsub = []; live.last = null; live.id = null;
+  renderLive();
+  if (!state.online) return;
+  if (!hasFirebase()) return renderLive('Chưa cấu hình Firebase');
+  const bill = state;
+  try { await firebase(); } catch (e) { console.warn(e); return renderLive('Không tải được Firebase'); }
+  if (state !== bill) return;   // đã chuyển sang bill khác trong lúc chờ
+  live.id = bill.id;
+  const billRef = fb.ref(fb.db, 'bills/' + bill.id);
+
+  // Có thay đổi lúc offline (đã lưu local) thì đẩy lên trước khi nghe dữ liệu mới
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(LIVE_KEY + bill.id)); } catch (e) {}
+  if (saved) {
+    const u = diff(flatten(toRemote(bill)), saved);
+    if (Object.keys(u).length) fb.update(billRef, u).catch(console.warn);
+  }
+
+  live.unsub.push(fb.onValue(billRef, snap => {
+    const val = snap.val();
+    if (!val) { toast('Không tìm thấy bill online, có thể link sai'); return; }
+    Object.assign(bill, fromRemote(val));
+    setLast(bill.id, flatten(toRemote(bill)));
+    save();
+    if (state === bill) renderSoon();
+  }, e => { console.warn(e); renderLive('Không có quyền truy cập bill'); }));
+  live.unsub.push(fb.onValue(fb.ref(fb.db, '.info/connected'), s => renderLive(null, s.val())));
+}
+
+async function goLive() {
+  if (!state.members.length && !state.expenses.length && !state.name) return toast('Nhập tên bill hoặc thành viên trước');
+  if (!confirm('Đưa bill lên mạng? Ai có link đều xem và sửa được bill này.')) return;
+  const oldId = state.id;
+  try {
+    await firebase();
+    const id = longId();
+    await fb.set(fb.ref(fb.db, 'bills/' + id), toRemote(state));
+    state.id = id; state.online = true;
+    setLast(id, flatten(toRemote(state)));
+    selectBill(id);
+    commit();
+    toast('Đã bật sửa chung, bấm “Copy link” để gửi nhóm');
+  } catch (e) {
+    console.warn(e);
+    state.id = oldId; state.online = false;
+    toast('Không bật được sửa chung: ' + (e.code || e.message));
+  }
+}
+
+// Đang gõ dở trong ô nhập thì chờ rời ô rồi mới vẽ lại, tránh mất chữ
+let renderPending = false;
+function renderSoon() {
+  const a = document.activeElement;
+  if (a && a.closest('#members, #expSplit') ) { renderPending = true; return; }
+  render();
+}
+document.addEventListener('focusout', () => {
+  if (renderPending) setTimeout(() => { if (renderPending && !document.activeElement?.closest('#members, #expSplit')) { renderPending = false; render(); } });
+});
+
+function renderLive(error, connected) {
+  $('btnLive').hidden = !hasFirebase() || !!state.online;
+  const s = $('liveStatus');
+  s.hidden = !state.online;
+  if (!state.online) return;
+  if (error) { s.className = 'live-status off'; s.innerHTML = `<b>●</b> ${esc(error)}`; return; }
+  if (connected === undefined) { s.className = 'live-status'; s.textContent = '☁️ Sửa chung · đang kết nối…'; return; }
+  s.className = 'live-status' + (connected ? '' : ' off');
+  s.innerHTML = connected ? '<b>●</b> Sửa chung · đã đồng bộ' : '<b>●</b> Mất kết nối · thay đổi sẽ gửi khi có mạng';
+}
 
 // ---------- Tính toán ----------
 // Phần phải chịu của từng người trong 1 khoản chi: {memberId: số tiền}
@@ -374,6 +531,7 @@ function splitText(e) {
 }
 
 function render() {
+  renderPending = false;
   renderBills();
   if (document.activeElement !== $('billName')) $('billName').value = state.name;
 
@@ -456,15 +614,20 @@ $('btnNew').addEventListener('click', () => {
   commit();
   $('billName').focus();
 });
+$('btnLive').addEventListener('click', goLive);
 $('btnDelete').addEventListener('click', () => {
-  if (!confirm(`Xoá bill “${state.name || 'Bill chưa đặt tên'}”? Không khôi phục được.`)) return;
+  const name = state.name || 'Bill chưa đặt tên';
+  if (!confirm(state.online
+    ? `Xoá bill “${name}” khỏi máy này? Bill vẫn còn trên mạng, mở lại link là thấy.`
+    : `Xoá bill “${name}”? Không khôi phục được.`)) return;
+  try { localStorage.removeItem(LIVE_KEY + state.id); } catch (e) {}
   store.bills = store.bills.filter(b => b.id !== state.id);
   if (!store.bills.length) store.bills.push(newBill());
   selectBill(store.bills[0].id);
   commit();
 });
 $('billName').addEventListener('input', e => { state.name = e.target.value; save(); renderBills(); });
-$('billName').addEventListener('change', render);
+$('billName').addEventListener('change', commit);
 
 $('memberForm').addEventListener('submit', e => {
   e.preventDefault();
@@ -561,8 +724,13 @@ $('paidList').addEventListener('click', e => {
 });
 
 $('btnShare').addEventListener('click', async () => {
-  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(state)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-  const url = location.origin + location.pathname + '#' + b64;
+  let hash;
+  if (state.online) hash = 'b=' + state.id;
+  else {
+    const { online, ...b } = state;
+    hash = btoa(unescape(encodeURIComponent(JSON.stringify(b)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  }
+  const url = location.origin + location.pathname + '#' + hash;
   try { await navigator.clipboard.writeText(url); toast('Đã copy link bill'); }
   catch { prompt('Copy link này:', url); }
 });

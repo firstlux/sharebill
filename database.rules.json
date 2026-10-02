@@ -1,0 +1,11 @@
+{
+  "rules": {
+    "bills": {
+      "$billId": {
+        ".read": "$billId.length >= 16",
+        ".write": "$billId.length >= 16 && newData.exists()",
+        ".validate": "newData.hasChildren(['created'])"
+      }
+    }
+  }
+}
