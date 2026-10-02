@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShareBill</title>
+<meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ShareBill">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --text: #1d2330; --muted: #6b7280;
+    --line: #e5e7eb; --primary: #0f766e; --primary-2: #115e59;
+    --pos: #15803d; --neg: #b91c1c; --chip: #f0fdfa;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11141a; --card: #1a1f28; --text: #e5e7eb; --muted: #9ca3af;
+      --line: #2b3240; --primary: #2dd4bf; --primary-2: #5eead4;
+      --pos: #4ade80; --neg: #f87171; --chip: #0f2a28;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 20px 16px 60px; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  header h1 { margin: 0; font-size: 22px; }
+  header input { flex: 1; min-width: 180px; font-size: 16px; font-weight: 600; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 16px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input, select { font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+  input:focus, select:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+  button { font: inherit; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer;
+    background: var(--primary); color: #fff; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { button { color: #04201d; } }
+  button:hover { background: var(--primary-2); }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  button.ghost:hover { color: var(--text); }
+  button.x { background: transparent; color: var(--muted); padding: 2px 8px; font-weight: 400; }
+  button.x:hover { color: var(--neg); }
+  .grow { flex: 1; }
+  .muted { color: var(--muted); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; color: var(--muted); font-weight: 500; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pos { color: var(--pos); } .neg { color: var(--neg); }
+  .member { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 8px; }
+  .member .row + .row { margin-top: 8px; }
+  .member .name { font-weight: 600; flex: 1; min-width: 120px; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chips label { background: var(--chip); border: 1px solid var(--line); border-radius: 999px;
+    padding: 4px 10px; cursor: pointer; user-select: none; font-size: 14px; }
+  .chips input { margin: 0 4px 0 0; vertical-align: -2px; }
+  .transfers { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .tf { border: 1px solid var(--line); border-radius: 12px; padding: 12px; text-align: center; }
+  .tf .who { font-weight: 600; }
+  .tf .amt { font-size: 20px; font-weight: 700; color: var(--primary); margin: 4px 0; }
+  .tf .qr { background: #fff; border-radius: 8px; padding: 8px; display: inline-block; margin-top: 8px; }
+  .tf .qr svg, .tf .qr img { display: block; width: 200px; height: 200px; }
+  .tf .bank { font-size: 13px; color: var(--muted); margin-top: 6px; word-break: break-word; }
+  .empty { color: var(--muted); text-align: center; padding: 12px; }
+  .total { font-weight: 700; }
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 8px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  @media (max-width: 560px) {
+    .exp-form > * { flex: 1 1 100%; }
+    .hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🧾 ShareBill</h1>
+    <input id="billName" placeholder="Tên bill, vd: Đi Đà Lạt 09/2026">
+    <button class="ghost" id="btnShare" title="Copy link chứa toàn bộ dữ liệu bill">🔗 Copy link</button>
+    <button class="ghost" id="btnReset">Xoá hết</button>
+  </header>
+
+  <section class="card">
+    <h2>1. Thành viên</h2>
+    <form class="row" id="memberForm">
+      <input id="memberName" class="grow" placeholder="Tên thành viên" autocomplete="off">
+      <button>Thêm</button>
+    </form>
+    <p class="muted">Nhập ngân hàng + số tài khoản để người khác quét QR chuyển tiền cho bạn.</p>
+    <div id="members"></div>
+  </section>
+
+  <section class="card">
+    <h2>2. Khoản chi</h2>
+    <form class="row exp-form" id="expForm">
+      <input id="expDesc" class="grow" placeholder="Nội dung, vd: Ăn tối" autocomplete="off">
+      <input id="expAmount" inputmode="numeric" placeholder="Số tiền" style="width:140px" autocomplete="off">
+      <select id="expPayer" title="Người trả"></select>
+      <button>Thêm</button>
+    </form>
+    <div style="margin-top:10px">
+      <span class="muted">Chia cho:</span>
+      <button type="button" class="x" id="btnAll">chọn tất cả</button>
+      <div class="chips" id="expSplit" style="margin-top:6px"></div>
+    </div>
+    <div style="margin-top:12px; overflow-x:auto">
+      <table>
+        <thead><tr><th>Nội dung</th><th>Người trả</th><th class="hide-sm">Chia cho</th><th class="num">Số tiền</th><th></th></tr></thead>
+        <tbody id="expenses"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3. Tổng kết</h2>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Thành viên</th><th class="num">Đã trả</th><th class="num">Phần phải chịu</th><th class="num">Chênh lệch</th></tr></thead>
+        <tbody id="summary"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>4. Chuyển khoản &amp; mã QR</h2>
+    <p class="muted" style="margin-top:-6px">Số lần chuyển đã được tối giản. Quét QR bằng app ngân hàng bất kỳ (chuẩn VietQR/Napas).</p>
+    <div class="transfers" id="transfers"></div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// Mã BIN ngân hàng theo Napas (dùng cho VietQR)
+const BANKS = [
+  ['970436','Vietcombank'], ['970415','VietinBank'], ['970418','BIDV'], ['970405','Agribank'],
+  ['970407','Techcombank'], ['970422','MB Bank'], ['970416','ACB'], ['970432','VPBank'],
+  ['970423','TPBank'], ['970403','Sacombank'], ['970437','HDBank'], ['970441','VIB'],
+  ['970443','SHB'], ['970431','Eximbank'], ['970426','MSB'], ['970448','OCB'],
+  ['970440','SeABank'], ['970449','LPBank'], ['970428','Nam A Bank'], ['970409','Bac A Bank'],
+  ['970454','BVBank (Timo)'], ['970425','ABBANK'], ['970452','KienlongBank'], ['970412','PVcomBank'],
+  ['970427','VietABank'], ['970438','BaoViet Bank'], ['970419','NCB'], ['970430','PGBank'],
+  ['970400','Saigonbank'], ['970406','DongA Bank'], ['970408','GPBank'], ['970414','OceanBank'],
+  ['546034','CAKE by VPBank'], ['546035','Ubank by VPBank'],
+];
+const bankName = bin => (BANKS.find(b => b[0] === bin) || [, ''])[1];
+
+const $ = id => document.getElementById(id);
+const fmt = n => Math.round(n).toLocaleString('vi-VN') + 'đ';
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Math.random().toString(36).slice(2, 9);
+const parseAmount = s => {
+  // hỗ trợ "150k", "1.2tr", "150.000"
+  s = String(s).trim().toLowerCase().replace(/\s/g, '');
+  let mul = 1;
+  if (/k$/.test(s)) { mul = 1e3; s = s.slice(0, -1); }
+  else if (/(tr|m)$/.test(s)) { mul = 1e6; s = s.replace(/(tr|m)$/, ''); }
+  s = mul > 1 ? s.replace(',', '.') : s.replace(/[.,]/g, '');
+  const n = parseFloat(s) * mul;
+  return isFinite(n) && n > 0 ? Math.round(n) : 0;
+};
+
+// ---------- State ----------
+const KEY = 'sharebill-v1';
+let state = { name: '', members: [], expenses: [] };
+
+function load() {
+  if (location.hash.length > 1) {
+    try {
+      const json = decodeURIComponent(escape(atob(location.hash.slice(1).replace(/-/g,'+').replace(/_/g,'/'))));
+      state = JSON.parse(json);
+      history.replaceState(null, '', location.pathname);
+      save();
+      toast('Đã mở bill từ link');
+      return;
+    } catch (e) { console.warn(e); }
+  }
+  try { const s = localStorage.getItem(KEY); if (s) state = JSON.parse(s); } catch (e) {}
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+function commit() { save(); render(); }
+
+// ---------- Tính toán ----------
+function compute() {
+  const paid = {}, owe = {};
+  state.members.forEach(m => { paid[m.id] = 0; owe[m.id] = 0; });
+  for (const e of state.expenses) {
+    const parts = e.split.filter(id => id in owe);
+    if (!parts.length || !(e.payer in paid)) continue;
+    paid[e.payer] += e.amount;
+    const base = Math.floor(e.amount / parts.length);
+    let rem = e.amount - base * parts.length;
+    parts.forEach(id => { owe[id] += base + (rem-- > 0 ? 1 : 0); });
+  }
+  const bal = state.members.map(m => ({ id: m.id, v: paid[m.id] - owe[m.id] }));
+  // Tối giản: ghép người nợ nhiều nhất với người được nhận nhiều nhất
+  const cred = bal.filter(b => b.v > 0).map(b => ({...b})).sort((a, b) => b.v - a.v);
+  const debt = bal.filter(b => b.v < 0).map(b => ({...b, v: -b.v})).sort((a, b) => b.v - a.v);
+  const transfers = [];
+  let i = 0, j = 0;
+  while (i < debt.length && j < cred.length) {
+    const x = Math.min(debt[i].v, cred[j].v);
+    if (x > 0) transfers.push({ from: debt[i].id, to: cred[j].id, amount: x });
+    debt[i].v -= x; cred[j].v -= x;
+    if (debt[i].v === 0) i++;
+    if (cred[j].v === 0) j++;
+  }
+  return { paid, owe, transfers };
+}
+
+// ---------- VietQR (EMVCo) ----------
+const tlv = (id, v) => id + String(v.length).padStart(2, '0') + v;
+function crc16(s) {
+  let crc = 0xFFFF;
+  for (let i = 0; i < s.length; i++) {
+    crc ^= s.charCodeAt(i) << 8;
+    for (let k = 0; k < 8; k++) crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+const noAccent = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D')
+  .replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+function vietQR(bin, account, amount, info) {
+  const merchant = tlv('00', 'A000000727') + tlv('01', tlv('00', bin) + tlv('01', account)) + tlv('02', 'QRIBFTTA');
+  let p = tlv('00', '01') + tlv('01', amount ? '12' : '11') + tlv('38', merchant) + tlv('53', '704');
+  if (amount) p += tlv('54', String(amount));
+  p += tlv('58', 'VN');
+  const add = noAccent(info || '').slice(0, 50);
+  if (add) p += tlv('62', tlv('08', add));
+  p += '6304';
+  return p + crc16(p);
+}
+function qrSvg(text) {
+  const q = qrcode(0, 'M'); q.addData(text); q.make();
+  return q.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+}
+
+// ---------- Render ----------
+const nameOf = id => (state.members.find(m => m.id === id) || {}).name || '?';
+
+function render() {
+  $('billName').value = state.name || '';
+
+  // Thành viên
+  const bankOpts = '<option value="">— Ngân hàng —</option>' + BANKS.map(b => `<option value="${b[0]}">${b[1]}</option>`).join('');
+  $('members').innerHTML = state.members.map(m => `
+    <div class="member" data-id="${m.id}">
+      <div class="row">
+        <span class="name">${esc(m.name)}</span>
+        <button class="x" data-act="delMember" title="Xoá">✕</button>
+      </div>
+      <div class="row">
+        <select data-f="bank" style="flex:1 1 160px">${bankOpts}</select>
+        <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 160px" value="${esc(m.account || '')}">
+      </div>
+    </div>`).join('') || '<div class="empty">Chưa có thành viên</div>';
+  state.members.forEach(m => {
+    const sel = document.querySelector(`.member[data-id="${m.id}"] select`);
+    if (sel) sel.value = m.bank || '';
+  });
+
+  // Form khoản chi
+  const prevPayer = $('expPayer').value;
+  $('expPayer').innerHTML = '<option value="">Người trả…</option>' +
+    state.members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
+  $('expPayer').value = state.members.some(m => m.id === prevPayer) ? prevPayer : '';
+  // Giữ trạng thái tick cũ; thành viên mới mặc định được tick
+  const unchecked = new Set([...document.querySelectorAll('#expSplit input:not(:checked)')].map(i => i.value));
+  $('expSplit').innerHTML = state.members.map(m =>
+    `<label><input type="checkbox" value="${m.id}" ${unchecked.has(m.id) ? '' : 'checked'}>${esc(m.name)}</label>`
+  ).join('') || '<span class="muted">Thêm thành viên trước</span>';
+
+  // Danh sách khoản chi
+  const total = state.expenses.reduce((s, e) => s + e.amount, 0);
+  $('expenses').innerHTML = state.expenses.map(e => `
+    <tr data-id="${e.id}">
+      <td>${esc(e.desc || '(không tên)')}</td>
+      <td>${esc(nameOf(e.payer))}</td>
+      <td class="hide-sm muted">${e.split.length === state.members.length ? 'Tất cả' : e.split.map(id => esc(nameOf(id))).join(', ')}</td>
+      <td class="num">${fmt(e.amount)}</td>
+      <td><button class="x" data-act="delExp" title="Xoá">✕</button></td>
+    </tr>`).join('') +
+    (state.expenses.length ? `<tr><td class="total" colspan="3">Tổng cộng</td><td class="num total">${fmt(total)}</td><td></td></tr>`
+      : '<tr><td colspan="5" class="empty">Chưa có khoản chi</td></tr>');
+
+  // Tổng kết
+  const { paid, owe, transfers } = compute();
+  $('summary').innerHTML = state.members.map(m => {
+    const d = paid[m.id] - owe[m.id];
+    return `<tr><td>${esc(m.name)}</td><td class="num">${fmt(paid[m.id])}</td><td class="num">${fmt(owe[m.id])}</td>
+      <td class="num ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}">${d > 0 ? '+' : ''}${fmt(d)}</td></tr>`;
+  }).join('') || '<tr><td colspan="4" class="empty">—</td></tr>';
+
+  // Chuyển khoản + QR
+  const billName = state.name || 'ShareBill';
+  $('transfers').innerHTML = transfers.map(t => {
+    const to = state.members.find(m => m.id === t.to);
+    const from = state.members.find(m => m.id === t.from);
+    const hasBank = to.bank && to.account;
+    const info = `${from.name} tra ${billName}`;
+    const qr = hasBank ? `<div class="qr">${qrSvg(vietQR(to.bank, to.account.replace(/\s/g, ''), t.amount, info))}</div>
+      <div class="bank">${esc(bankName(to.bank))} · ${esc(to.account)}<br>ND: ${esc(noAccent(info))}</div>`
+      : `<div class="bank" style="margin-top:12px">⚠️ ${esc(to.name)} chưa nhập ngân hàng / số tài khoản</div>`;
+    return `<div class="tf"><div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(t.amount)}</div>${qr}</div>`;
+  }).join('') || '<div class="empty">Không có khoản nào cần chuyển</div>';
+}
+
+// ---------- Sự kiện ----------
+$('billName').addEventListener('input', e => { state.name = e.target.value; save(); });
+$('billName').addEventListener('change', render);
+
+$('memberForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const names = $('memberName').value.split(',').map(s => s.trim()).filter(Boolean);
+  if (!names.length) return;
+  names.forEach(name => state.members.push({ id: uid(), name, bank: '', account: '' }));
+  $('memberName').value = '';
+  commit();
+});
+
+$('members').addEventListener('click', e => {
+  if (e.target.dataset.act !== 'delMember') return;
+  const id = e.target.closest('.member').dataset.id;
+  if (state.expenses.some(x => x.payer === id || x.split.includes(id)) &&
+      !confirm('Thành viên này có trong khoản chi. Xoá sẽ bỏ họ khỏi các khoản đó. Tiếp tục?')) return;
+  state.members = state.members.filter(m => m.id !== id);
+  state.expenses = state.expenses.filter(x => x.payer !== id)
+    .map(x => ({ ...x, split: x.split.filter(s => s !== id) })).filter(x => x.split.length);
+  commit();
+});
+$('members').addEventListener('change', e => {
+  const f = e.target.dataset.f; if (!f) return;
+  const m = state.members.find(m => m.id === e.target.closest('.member').dataset.id);
+  m[f] = e.target.value.trim();
+  commit();
+});
+
+$('expForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const amount = parseAmount($('expAmount').value);
+  const payer = $('expPayer').value;
+  const split = [...document.querySelectorAll('#expSplit input:checked')].map(i => i.value);
+  if (!amount) return toast('Nhập số tiền hợp lệ (vd: 250000, 250k, 1.2tr)');
+  if (!payer) return toast('Chọn người trả');
+  if (!split.length) return toast('Chọn ít nhất 1 người để chia');
+  state.expenses.push({ id: uid(), desc: $('expDesc').value.trim(), amount, payer, split });
+  $('expDesc').value = ''; $('expAmount').value = '';
+  $('expDesc').focus();
+  commit();
+});
+$('expenses').addEventListener('click', e => {
+  if (e.target.dataset.act !== 'delExp') return;
+  const id = e.target.closest('tr').dataset.id;
+  state.expenses = state.expenses.filter(x => x.id !== id);
+  commit();
+});
+$('btnAll').addEventListener('click', () => {
+  const boxes = [...document.querySelectorAll('#expSplit input')];
+  const all = boxes.every(b => b.checked);
+  boxes.forEach(b => b.checked = !all);
+});
+
+$('btnShare').addEventListener('click', async () => {
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(state)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  const url = location.origin + location.pathname + '#' + b64;
+  try { await navigator.clipboard.writeText(url); toast('Đã copy link bill'); }
+  catch { prompt('Copy link này:', url); }
+});
+$('btnReset').addEventListener('click', () => {
+  if (!confirm('Xoá toàn bộ bill hiện tại?')) return;
+  state = { name: '', members: [], expenses: [] };
+  commit();
+});
+
+let tt;
+function toast(msg) {
+  $('toast').textContent = msg; $('toast').classList.add('show');
+  clearTimeout(tt); tt = setTimeout(() => $('toast').classList.remove('show'), 2200);
+}
+
+load();
+render();
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(console.warn);
+}
+</script>
+</body>
+</html>
