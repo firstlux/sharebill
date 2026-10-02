@@ -40,6 +40,12 @@
   tr.editing td { background: var(--chip); }
   .groups-box { border: 1px dashed var(--line); border-radius: 10px; padding: 10px; margin-bottom: 12px; }
   .groups-box .chips:not(:empty) { margin-bottom: 8px; }
+  #addFromDir { display: flex; flex-wrap: wrap; gap: 6px; }
+  #addFromDir button { background: var(--chip); color: var(--text); border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px 12px; font-weight: 500; font-size: 14px; }
+  #addFromDir button:hover { border-color: var(--primary); background: var(--chip); }
+  #addFromDir button.grp { font-weight: 700; color: var(--primary); }
+  .member .tag { font-size: 13px; color: var(--muted); white-space: nowrap; }
   .gchip { display: inline-flex; align-items: center; gap: 2px; background: var(--chip); border: 1px solid var(--line);
     border-radius: 999px; padding: 2px 4px 2px 12px; font-size: 14px; font-weight: 600; }
   .gchip button.x { padding: 2px 6px; }
@@ -128,7 +134,12 @@
     background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 8px;
     opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: 1; }
+  .tabs button { white-space: nowrap; }
   @media (max-width: 560px) {
+    .tabs button { padding: 8px 4px; font-size: 14px; }
+    .tabs .count { display: none; }
+    #personForm .grow, #memberForm .grow { flex-basis: 100%; }
+    #personForm select, #memberForm select { flex: 1; }
     #billName { font-size: 18px; }
     .exp-form > * { flex: 1 1 100%; }
     .hide-sm { display: none; }
@@ -160,16 +171,26 @@
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="bill">🧾 Bill</button>
     <button role="tab" data-tab="members">👥 Thành viên <span class="count" id="memberCount"></span></button>
+    <button role="tab" data-tab="dir">📇 Danh bạ <span class="count" id="dirCount"></span></button>
   </nav>
 
   <section class="card" data-page="members">
-    <h2>Thành viên</h2>
-    <form class="row" id="memberForm">
-      <input id="memberName" class="grow" placeholder="Tên thành viên (nhiều tên cách nhau dấu phẩy)" autocomplete="off">
-      <select id="memberGroup" title="Thêm vào nhóm" hidden></select>
-      <button>Thêm</button>
-    </form>
-    <p class="muted">Nhập ngân hàng + số tài khoản để người khác quét QR chuyển tiền cho bạn.</p>
+    <h2>Thành viên của bill</h2>
+    <div class="groups-box">
+      <div class="muted" style="margin-bottom:6px">Thêm từ danh bạ (bấm để thêm):</div>
+      <div id="addFromDir"></div>
+      <form class="row" id="memberForm" style="margin-top:10px">
+        <input id="memberName" class="grow" placeholder="Hoặc nhập người mới, cách nhau dấu phẩy" autocomplete="off">
+        <select id="memberGroup" title="Nhóm của người mới" hidden></select>
+        <button>Thêm</button>
+      </form>
+    </div>
+    <p class="muted">Ngân hàng + số tài khoản dùng để tạo QR. Sửa ở đây cũng cập nhật vào danh bạ.</p>
+    <div id="members"></div>
+  </section>
+
+  <section class="card" data-page="dir">
+    <h2>Danh bạ <small>dùng chung cho mọi bill trên máy này</small></h2>
     <div class="groups-box">
       <div class="chips" id="groupChips"></div>
       <form class="row" id="groupForm">
@@ -177,7 +198,12 @@
         <button class="ghost">+ Nhóm</button>
       </form>
     </div>
-    <div id="members"></div>
+    <form class="row" id="personForm" style="margin-bottom:12px">
+      <input id="personName" class="grow" placeholder="Thêm người, nhiều tên cách nhau dấu phẩy" autocomplete="off">
+      <select id="personGroup" title="Nhóm" hidden></select>
+      <button>Thêm</button>
+    </form>
+    <div id="people"></div>
   </section>
 
   <section class="card" data-page="bill">
@@ -287,6 +313,7 @@ function load() {
     else { const old = localStorage.getItem(OLD_KEY); if (old) store.bills = [JSON.parse(old)]; }
   } catch (e) {}
   store.bills = (store.bills || []).map(normalize);
+  seedDirectory();
 
   const liveId = location.hash.match(/^#b=([\w-]{16,})$/);
   if (liveId) {
@@ -312,6 +339,64 @@ function load() {
   save();
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {} }
+
+// ---------- Danh bạ: người + nhóm dùng chung cho mọi bill (lưu trên máy) ----------
+// Thành viên trong bill là bản sao của người trong danh bạ, liên kết qua pid (mặc định = id).
+// Nhóm trong bill cũng là bản sao của nhóm danh bạ, liên kết qua pid.
+const pidOf = x => x.pid || x.id;
+const nameKey = s => noAccent(s).toLowerCase();
+const personOf = m => store.people.find(p => p.id === pidOf(m));
+
+// Lần đầu: gom thành viên / nhóm của các bill cũ vào danh bạ, gộp trùng tên
+function seedDirectory() {
+  if (store.people) { store.groups ||= []; return; }
+  store.people = []; store.groups = [];
+  for (const b of store.bills) {
+    for (const g of b.groups) {
+      let G = store.groups.find(x => nameKey(x.name) === nameKey(g.name));
+      if (!G) store.groups.push(G = { id: g.id, name: g.name });
+      if (G.id !== g.id) g.pid = G.id;
+    }
+    for (const m of b.members) {
+      let P = store.people.find(x => nameKey(x.name) === nameKey(m.name));
+      const bg = b.groups.find(x => x.id === m.group);
+      if (!P) store.people.push(P = { id: m.id, name: m.name, bank: m.bank || '', account: m.account || '', group: bg ? pidOf(bg) : '' });
+      else if (!P.account && m.account) { P.bank = m.bank; P.account = m.account; }
+      if (P.id !== m.id) m.pid = P.id;
+    }
+  }
+}
+// Nhóm trong bill b ứng với nhóm danh bạ gid (tạo bản sao nếu bill chưa có)
+function billGroupFor(b, gid) {
+  const g = gid && store.groups.find(x => x.id === gid);
+  if (!g) return '';
+  let bg = b.groups.find(x => pidOf(x) === gid);
+  if (!bg) b.groups.push(bg = { id: gid, name: g.name });
+  return bg.id;
+}
+// Đẩy thông tin người trong danh bạ xuống mọi bill có người đó
+function propagatePerson(p) {
+  for (const b of store.bills) for (const m of b.members) if (pidOf(m) === p.id)
+    Object.assign(m, { name: p.name, bank: p.bank, account: p.account, group: billGroupFor(b, p.group) });
+}
+function propagateGroup(g) {
+  for (const b of store.bills) for (const bg of b.groups) if (pidOf(bg) === g.id) bg.name = g.name;
+}
+function findOrCreatePerson(name, group) {
+  let p = store.people.find(x => nameKey(x.name) === nameKey(name));
+  if (!p) store.people.push(p = { id: uid(), name, bank: '', account: '', group });
+  return p;
+}
+function addPeopleToBill(ids) {
+  let n = 0;
+  for (const id of ids) {
+    const p = store.people.find(x => x.id === id);
+    if (!p || state.members.some(m => pidOf(m) === id)) continue;
+    state.members.push({ id: p.id, name: p.name, bank: p.bank, account: p.account, group: billGroupFor(state, p.group) });
+    n++;
+  }
+  return n;
+}
 function commit() { save(); render(); pushLive(); }
 
 // ---------- Sửa chung (Firebase Realtime Database) ----------
@@ -439,11 +524,11 @@ async function goLive(ask = true) {
 let renderPending = false;
 function renderSoon() {
   const a = document.activeElement;
-  if (a && a.closest('#members, #expSplit') ) { renderPending = true; return; }
+  if (a && a.closest('#members, #people, #expSplit') ) { renderPending = true; return; }
   render();
 }
 document.addEventListener('focusout', () => {
-  if (renderPending) setTimeout(() => { if (renderPending && !document.activeElement?.closest('#members, #expSplit')) { renderPending = false; render(); } });
+  if (renderPending) setTimeout(() => { if (renderPending && !document.activeElement?.closest('#members, #people, #expSplit')) { renderPending = false; render(); } });
 });
 
 function renderLive(error, connected) {
@@ -639,13 +724,14 @@ function updateHint() {
   }
 }
 
-// Thành viên theo nhóm: [{g: nhóm | null, list}]; withEmpty: giữ cả nhóm chưa có ai
-function groupedMembers(withEmpty) {
-  const known = new Set(state.groups.map(g => g.id));
-  const out = state.groups.map(g => ({ g, list: state.members.filter(m => m.group === g.id) }));
-  out.push({ g: null, list: state.members.filter(m => !known.has(m.group)) });
+// Xếp theo nhóm: [{g: nhóm | null, list}]; withEmpty: giữ cả nhóm chưa có ai
+function groupBy(groups, items, withEmpty) {
+  const known = new Set(groups.map(g => g.id));
+  const out = groups.map(g => ({ g, list: items.filter(m => m.group === g.id) }));
+  out.push({ g: null, list: items.filter(m => !known.has(m.group)) });
   return out.filter(x => x.list.length || (withEmpty && x.g));
 }
+const groupedMembers = withEmpty => groupBy(state.groups, state.members, withEmpty);
 const groupMemberIds = gid => state.members.filter(m => m.group === gid).map(m => m.id);
 
 function splitText(e) {
@@ -669,42 +755,8 @@ function render() {
   if (document.activeElement !== $('billName')) $('billName').value = state.name;
   if (document.activeElement !== $('billDate')) $('billDate').value = state.date;
 
-  // Nhóm
-  const hasGroups = state.groups.length > 0;
-  const groupOpts = '<option value="">Không nhóm</option>' + state.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
-  $('groupChips').innerHTML = state.groups.map(g => `
-    <span class="gchip" data-id="${g.id}">👥 ${esc(g.name)}
-      <button type="button" class="x" data-act="renameGroup" title="Đổi tên">✎</button>
-      <button type="button" class="x" data-act="delGroup" title="Xoá nhóm">✕</button></span>`).join('');
-  const prevGroup = $('memberGroup').value;
-  $('memberGroup').innerHTML = groupOpts;
-  $('memberGroup').value = state.groups.some(g => g.id === prevGroup) ? prevGroup : '';
-  $('memberGroup').hidden = !hasGroups;
-
-  // Thành viên (xếp theo nhóm)
-  const bankOpts = '<option value="">— Ngân hàng —</option>' + BANKS.map(b => `<option value="${b[0]}">${b[1]}</option>`).join('');
-  const card = m => `
-    <div class="member" data-id="${m.id}">
-      <div class="row top-line">
-        <span class="name">${esc(m.name)}</span>
-        ${hasGroups ? `<select data-f="group" title="Nhóm">${groupOpts}</select>` : ''}
-        <button class="x" data-act="delMember" title="Xoá">✕</button>
-      </div>
-      <div class="row">
-        <select data-f="bank" style="flex:1 1 160px">${bankOpts}</select>
-        <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 160px" value="${esc(m.account || '')}">
-      </div>
-    </div>`;
-  $('members').innerHTML = !state.members.length ? '<div class="empty">Chưa có thành viên</div>'
-    : !hasGroups ? state.members.map(card).join('')
-    : groupedMembers(true).map(({ g, list }) => `
-        <h3 class="ghead">${g ? '👥 ' + esc(g.name) : 'Chưa xếp nhóm'} <span class="muted">· ${list.length} người</span></h3>
-        ${list.map(card).join('') || '<div class="muted" style="margin-bottom:8px">Chưa có ai, chọn nhóm ở từng thành viên.</div>'}`).join('');
-  state.members.forEach(m => {
-    const el = document.querySelector(`.member[data-id="${m.id}"]`);
-    el.querySelector('[data-f=bank]').value = m.bank || '';
-    if (hasGroups) el.querySelector('[data-f=group]').value = state.groups.some(g => g.id === m.group) ? m.group : '';
-  });
+  renderPeople();
+  const hasGroups = groupedMembers().some(x => x.g);
 
   // Form khoản chi
   const prevPayer = $('expPayer').value;
@@ -766,7 +818,82 @@ function render() {
     </div>`).join('');
 }
 
-// ---------- Tab Bill / Thành viên ----------
+// Trang "Thành viên của bill" và trang "Danh bạ"
+function renderPeople() {
+  $('dirCount').textContent = store.people.length ? `(${store.people.length})` : '';
+  const bankOpts = '<option value="">— Ngân hàng —</option>' + BANKS.map(b => `<option value="${b[0]}">${b[1]}</option>`).join('');
+  const groupOpts = '<option value="">Không nhóm</option>' + store.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+  const bankRow = x => `
+      <div class="row">
+        <select data-f="bank" style="flex:1 1 160px">${bankOpts}</select>
+        <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 160px" value="${esc(x.account || '')}">
+      </div>`;
+  const head = (g, n) => `<h3 class="ghead">${g ? '👥 ' + esc(g.name) : 'Chưa xếp nhóm'} <span class="muted">· ${n} người</span></h3>`;
+
+  // Nhóm danh bạ + ô chọn nhóm cho người mới
+  $('groupChips').innerHTML = store.groups.map(g => `
+    <span class="gchip" data-id="${g.id}">👥 ${esc(g.name)}
+      <button type="button" class="x" data-act="renameGroup" title="Đổi tên">✎</button>
+      <button type="button" class="x" data-act="delGroup" title="Xoá nhóm">✕</button></span>`).join('');
+  for (const id of ['memberGroup', 'personGroup']) {
+    const s = $(id), prev = s.value;
+    s.innerHTML = groupOpts;
+    s.value = store.groups.some(g => g.id === prev) ? prev : '';
+    s.hidden = !store.groups.length;
+  }
+
+  // Thêm từ danh bạ: cả nhóm hoặc từng người chưa có trong bill
+  const inBill = new Set(state.members.map(pidOf));
+  const notIn = store.people.filter(p => !inBill.has(p.id));
+  $('addFromDir').innerHTML = !store.people.length
+    ? '<span class="muted">Danh bạ trống. Nhập người mới bên dưới, họ sẽ được lưu luôn vào danh bạ.</span>'
+    : !notIn.length ? '<span class="muted">Mọi người trong danh bạ đã có trong bill.</span>'
+    : store.groups.map(g => {
+        const k = notIn.filter(p => p.group === g.id).length;
+        return k ? `<button type="button" class="grp" data-addgroup="${g.id}">+ 👥 ${esc(g.name)} (${k})</button>` : '';
+      }).join('') +
+      groupBy(store.groups, notIn).flatMap(x => x.list)
+        .map(p => `<button type="button" data-addperson="${p.id}">+ ${esc(p.name)}</button>`).join('');
+
+  // Thành viên của bill
+  const billGroups = groupedMembers(), showHeads = billGroups.some(x => x.g);
+  const billCard = m => {
+    const bg = state.groups.find(g => g.id === m.group);
+    return `
+    <div class="member" data-id="${m.id}">
+      <div class="row top-line">
+        <span class="name">${esc(m.name)}</span>
+        ${bg && !showHeads ? `<span class="tag">👥 ${esc(bg.name)}</span>` : ''}
+        ${personOf(m) ? '' : '<button class="x" data-act="saveDir" title="Lưu người này vào danh bạ của bạn">📇 Lưu danh bạ</button>'}
+        <button class="x" data-act="delMember" title="Bỏ khỏi bill">✕</button>
+      </div>${bankRow(m)}
+    </div>`;
+  };
+  $('members').innerHTML = !state.members.length ? '<div class="empty">Bill chưa có ai. Chọn từ danh bạ ở trên.</div>'
+    : billGroups.map(({ g, list }) => (showHeads ? head(g, list.length) : '') + list.map(billCard).join('')).join('');
+  state.members.forEach(m => $('members').querySelector(`[data-id="${m.id}"] [data-f=bank]`).value = m.bank || '');
+
+  // Danh bạ
+  const dirCard = p => `
+    <div class="member" data-id="${p.id}">
+      <div class="row top-line">
+        <span class="name">${esc(p.name)}</span>
+        ${store.groups.length ? `<select data-f="group" title="Nhóm">${groupOpts}</select>` : ''}
+        <button class="x" data-act="renamePerson" title="Đổi tên">✎</button>
+        <button class="x" data-act="delPerson" title="Xoá khỏi danh bạ">✕</button>
+      </div>${bankRow(p)}
+    </div>`;
+  $('people').innerHTML = !store.people.length ? '<div class="empty">Danh bạ trống</div>'
+    : groupBy(store.groups, store.people, true).map(({ g, list }) => (store.groups.length ? head(g, list.length) : '') +
+        (list.map(dirCard).join('') || '<div class="muted" style="margin-bottom:8px">Chưa có ai, chọn nhóm ở từng người.</div>')).join('');
+  store.people.forEach(p => {
+    const el = $('people').querySelector(`[data-id="${p.id}"]`);
+    el.querySelector('[data-f=bank]').value = p.bank || '';
+    if (store.groups.length) el.querySelector('[data-f=group]').value = store.groups.some(g => g.id === p.group) ? p.group : '';
+  });
+}
+
+// ---------- Tab Bill / Thành viên / Danh bạ ----------
 const TAB_KEY = 'sharebill-tab';
 function setTab(t) {
   document.querySelectorAll('[data-page]').forEach(s => s.hidden = s.dataset.page !== t);
@@ -811,18 +938,48 @@ $('billName').addEventListener('input', e => { state.name = e.target.value; save
 $('billName').addEventListener('change', commit);
 $('billDate').addEventListener('change', e => { state.date = e.target.value || isoDate(Date.now()); commit(); });
 
+const splitNames = s => s.split(',').map(x => x.trim()).filter(Boolean);
+
+// Người mới gõ ở trang bill: lưu vào danh bạ rồi thêm vào bill
 $('memberForm').addEventListener('submit', e => {
   e.preventDefault();
-  const names = $('memberName').value.split(',').map(s => s.trim()).filter(Boolean);
+  const names = splitNames($('memberName').value);
   if (!names.length) return;
   const group = $('memberGroup').value;
-  names.forEach(name => state.members.push({ id: uid(), name, bank: '', account: '', group }));
+  addPeopleToBill(names.map(n => findOrCreatePerson(n, group).id));
   $('memberName').value = '';
   commit();
 });
+$('addFromDir').addEventListener('click', e => {
+  const b = e.target.closest('[data-addgroup], [data-addperson]');
+  if (!b) return;
+  const gid = b.dataset.addgroup;
+  const n = addPeopleToBill(gid ? store.people.filter(p => p.group === gid).map(p => p.id) : [b.dataset.addperson]);
+  commit();
+  if (gid) toast(`Đã thêm ${n} người vào bill`);
+});
 
 $('members').addEventListener('click', e => {
-  if (e.target.dataset.act !== 'delMember') return;
+  const act = e.target.dataset.act;
+  if (act === 'saveDir') {
+    // Thành viên từ bill người khác chia sẻ: lưu vào danh bạ của mình
+    const m = state.members.find(x => x.id === e.target.closest('.member').dataset.id);
+    const same = store.people.find(p => nameKey(p.name) === nameKey(m.name));
+    if (same) {
+      m.pid = same.id;
+      if (!same.account && m.account) { same.bank = m.bank; same.account = m.account; }
+      propagatePerson(same);
+      toast(`Đã liên kết với “${same.name}” trong danh bạ`);
+    } else {
+      const bg = state.groups.find(g => g.id === m.group);
+      let gid = '';
+      if (bg) { gid = pidOf(bg); if (!store.groups.some(g => g.id === gid)) store.groups.push({ id: gid, name: bg.name }); }
+      store.people.push({ id: pidOf(m), name: m.name, bank: m.bank || '', account: m.account || '', group: gid });
+      toast(`Đã lưu “${m.name}” vào danh bạ`);
+    }
+    return commit();
+  }
+  if (act !== 'delMember') return;
   const id = e.target.closest('.member').dataset.id;
   const used = state.expenses.some(x => x.payer === id || x.split.includes(id)) ||
                state.payments.some(p => p.from === id || p.to === id);
@@ -840,6 +997,43 @@ $('members').addEventListener('change', e => {
   const f = e.target.dataset.f; if (!f) return;
   const m = state.members.find(m => m.id === e.target.closest('.member').dataset.id);
   m[f] = e.target.value.trim();
+  const p = personOf(m);
+  if (p) { p[f] = m[f]; propagatePerson(p); }   // cập nhật danh bạ và các bill khác
+  commit();
+});
+
+// ---------- Danh bạ ----------
+$('personForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const names = splitNames($('personName').value);
+  if (!names.length) return;
+  const before = store.people.length;
+  names.forEach(n => findOrCreatePerson(n, $('personGroup').value));
+  const added = store.people.length - before;
+  $('personName').value = '';
+  commit();
+  if (added < names.length) toast(`${names.length - added} tên đã có trong danh bạ, bỏ qua`);
+});
+$('people').addEventListener('change', e => {
+  const f = e.target.dataset.f; if (!f) return;
+  const p = store.people.find(x => x.id === e.target.closest('.member').dataset.id);
+  p[f] = e.target.value.trim();
+  propagatePerson(p);
+  commit();
+});
+$('people').addEventListener('click', e => {
+  const act = e.target.dataset.act;
+  if (!act) return;
+  const p = store.people.find(x => x.id === e.target.closest('.member').dataset.id);
+  if (act === 'renamePerson') {
+    const name = prompt('Tên mới:', p.name);
+    if (!name || !name.trim()) return;
+    p.name = name.trim();
+    propagatePerson(p);
+  } else if (act === 'delPerson') {
+    if (!confirm(`Xoá “${p.name}” khỏi danh bạ? Các bill đã có người này vẫn giữ nguyên.`)) return;
+    store.people = store.people.filter(x => x !== p);
+  }
   commit();
 });
 
@@ -938,26 +1132,27 @@ $('groupForm').addEventListener('submit', e => {
   e.preventDefault();
   const name = $('groupName').value.trim();
   if (!name) return;
+  if (store.groups.some(g => nameKey(g.name) === nameKey(name))) return toast(`Đã có nhóm “${name}”`);
   const g = { id: uid(), name };
-  state.groups.push(g);
+  store.groups.push(g);
   $('groupName').value = '';
-  $('memberGroup').hidden = false;
   commit();
-  $('memberGroup').value = g.id;   // thêm thành viên tiếp theo vào nhóm vừa tạo
+  $('personGroup').value = g.id;   // người thêm tiếp theo vào nhóm vừa tạo
   toast(`Đã tạo nhóm “${name}”`);
 });
 $('groupChips').addEventListener('click', e => {
   const act = e.target.dataset.act;
   if (!act) return;
-  const g = state.groups.find(x => x.id === e.target.closest('.gchip').dataset.id);
+  const g = store.groups.find(x => x.id === e.target.closest('.gchip').dataset.id);
   if (act === 'renameGroup') {
     const name = prompt('Tên nhóm mới:', g.name);
     if (!name || !name.trim()) return;
     g.name = name.trim();
+    propagateGroup(g);
   } else if (act === 'delGroup') {
-    if (!confirm(`Xoá nhóm “${g.name}”? Thành viên trong nhóm vẫn giữ nguyên, chỉ bỏ xếp nhóm.`)) return;
-    state.groups = state.groups.filter(x => x !== g);
-    state.members.forEach(m => { if (m.group === g.id) m.group = ''; });
+    if (!confirm(`Xoá nhóm “${g.name}”? Mọi người trong nhóm vẫn còn trong danh bạ, chỉ bỏ xếp nhóm.`)) return;
+    store.groups = store.groups.filter(x => x !== g);
+    store.people.forEach(p => { if (p.group === g.id) { p.group = ''; propagatePerson(p); } });
   }
   commit();
 });
