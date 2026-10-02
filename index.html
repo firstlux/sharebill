@@ -38,6 +38,19 @@
   #billDate { font-size: 13px; color: var(--muted); background: transparent; border-color: transparent; padding: 0 8px; }
   #billName:hover, #billDate:hover { border-color: var(--line); }
   tr.editing td { background: var(--chip); }
+  .groups-box { border: 1px dashed var(--line); border-radius: 10px; padding: 10px; margin-bottom: 12px; }
+  .groups-box .chips:not(:empty) { margin-bottom: 8px; }
+  .gchip { display: inline-flex; align-items: center; gap: 2px; background: var(--chip); border: 1px solid var(--line);
+    border-radius: 999px; padding: 2px 4px 2px 12px; font-size: 14px; font-weight: 600; }
+  .gchip button.x { padding: 2px 6px; }
+  .ghead { margin: 14px 0 8px; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+  .ghead:first-child { margin-top: 0; }
+  .member .row.top-line { flex-wrap: nowrap; }
+  .member select[data-f="group"] { padding: 4px 8px; font-size: 13px; max-width: 45%; }
+  #groupPicks button.x { color: var(--primary); }
+  tr.group-row td { font-weight: 700; background: var(--chip); }
+  tr.in-group td:first-child { padding-left: 20px; }
+  .tf button.ghost { margin-top: 8px; }
   td.acts { white-space: nowrap; text-align: right; }
   .icon-btn { position: relative; flex: none; width: 40px; height: 40px; padding: 0; display: inline-flex;
     align-items: center; justify-content: center; font-size: 18px; font-weight: 400; cursor: pointer;
@@ -139,7 +152,7 @@
     <div class="row actions">
       <button class="ghost" id="btnShare" title="Copy link chia sẻ bill">🔗 Copy link</button>
       <button class="ghost" id="btnLive" hidden title="Đưa bill lên mạng để cả nhóm cùng sửa">☁️ Bật sửa chung</button>
-      <span id="liveStatus" class="live-status" hidden></span>
+      <span id="liveStatus" class="live-status" hidden title="Chỉ ai có link mới xem và sửa được bill này"></span>
       <button class="x" id="btnDelete" title="Xoá bill">Xoá bill</button>
     </div>
   </header>
@@ -153,9 +166,17 @@
     <h2>Thành viên</h2>
     <form class="row" id="memberForm">
       <input id="memberName" class="grow" placeholder="Tên thành viên (nhiều tên cách nhau dấu phẩy)" autocomplete="off">
+      <select id="memberGroup" title="Thêm vào nhóm" hidden></select>
       <button>Thêm</button>
     </form>
     <p class="muted">Nhập ngân hàng + số tài khoản để người khác quét QR chuyển tiền cho bạn.</p>
+    <div class="groups-box">
+      <div class="chips" id="groupChips"></div>
+      <form class="row" id="groupForm">
+        <input id="groupName" class="grow" placeholder="Tạo nhóm, vd: Gia đình An, Phòng 2…" autocomplete="off">
+        <button class="ghost">+ Nhóm</button>
+      </form>
+    </div>
     <div id="members"></div>
   </section>
 
@@ -175,6 +196,7 @@
         <option value="exact">Chia theo số tiền</option>
       </select>
       <button type="button" class="x" id="btnAll">chọn / bỏ tất cả</button>
+      <span id="groupPicks"></span>
     </div>
     <div id="expSplit"></div>
     <div style="margin-top:12px; overflow-x:auto">
@@ -244,11 +266,11 @@ let state;
 const pad2 = n => String(n).padStart(2, '0');
 const isoDate = t => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 const viDate = iso => iso.split('-').reverse().join('/');
-const newBill = () => ({ id: uid(), name: '', created: Date.now(), date: isoDate(Date.now()), members: [], expenses: [], payments: [] });
+const newBill = () => ({ id: uid(), name: '', created: Date.now(), date: isoDate(Date.now()), members: [], expenses: [], payments: [], groups: [] });
 function normalize(b) {
   // bổ sung field còn thiếu cho dữ liệu cũ (v1, link cũ)
   b.id ||= uid(); b.created ||= Date.now(); b.name ||= ''; b.date ||= isoDate(b.created);
-  b.members ||= []; b.expenses ||= []; b.payments ||= [];
+  b.members ||= []; b.expenses ||= []; b.payments ||= []; b.groups ||= [];
   b.expenses.forEach(e => { e.mode ||= 'equal'; e.split ||= []; });
   return b;
 }
@@ -297,7 +319,7 @@ function commit() { save(); render(); pushLive(); }
 // để nhiều người sửa cùng lúc mà không ghi đè nhau (chỉ ghi phần thay đổi).
 const FB_VER = '12.3.0';
 const LIVE_KEY = 'sharebill-sync-';
-const COLS = ['members', 'expenses', 'payments'];
+const COLS = ['members', 'expenses', 'payments', 'groups'];
 let fb = null;
 let live = { id: null, unsub: [], last: null };
 
@@ -390,9 +412,10 @@ async function connectLive() {
   live.unsub.push(fb.onValue(fb.ref(fb.db, '.info/connected'), s => renderLive(null, s.val())));
 }
 
-async function goLive() {
-  if (!state.members.length && !state.expenses.length && !state.name) return toast('Nhập tên bill hoặc thành viên trước');
-  if (!confirm('Đưa bill lên mạng? Ai có link đều xem và sửa được bill này.')) return;
+// Trả về true nếu bật thành công. ask = false khi đã hỏi người dùng ở chỗ gọi.
+async function goLive(ask = true) {
+  if (!state.members.length && !state.expenses.length && !state.name) { toast('Nhập tên bill hoặc thành viên trước'); return false; }
+  if (ask !== false && !confirm('Đưa bill lên mạng? Chỉ ai có link mới xem và sửa được bill này.')) return false;
   const oldId = state.id;
   try {
     await firebase();
@@ -403,10 +426,12 @@ async function goLive() {
     selectBill(id);
     commit();
     toast('Đã bật sửa chung, bấm “Copy link” để gửi nhóm');
+    return true;
   } catch (e) {
     console.warn(e);
     state.id = oldId; state.online = false;
     toast('Không bật được sửa chung: ' + (e.code || e.message));
+    return false;
   }
 }
 
@@ -511,6 +536,49 @@ function qrSvg(text) {
   const q = qrcode(0, 'M'); q.addData(text); q.make();
   return q.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
 }
+const transferInfo = from => `${from.name} tra ${state.name || 'ShareBill'}`;
+const qrPayload = (to, amount, info) => vietQR(to.bank, to.account.replace(/\s/g, ''), amount, info);
+
+// Ảnh PNG: tiêu đề, số tiền, mã QR, ngân hàng, nội dung — để lưu hoặc gửi qua Zalo
+async function downloadQR(fromId, toId, amount) {
+  const from = state.members.find(m => m.id === fromId), to = state.members.find(m => m.id === toId);
+  const info = transferInfo(from);
+  const q = qrcode(0, 'M'); q.addData(qrPayload(to, amount, info)); q.make();
+  const n = q.getModuleCount(), cell = Math.floor(420 / n), size = cell * n;
+  const W = 600, top = 200, H = top + size + 150;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d');
+  const font = (w, px) => `${w} ${px}px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+  x.textAlign = 'center';
+  x.fillStyle = '#6b7280'; x.font = font(500, 22);
+  x.fillText(`${state.name || 'ShareBill'} · ${viDate(state.date)}`, W / 2, 50);
+  x.fillStyle = '#1d2330'; x.font = font(700, 30);
+  x.fillText(`${from.name} → ${to.name}`, W / 2, 100);
+  x.fillStyle = '#0f766e'; x.font = font(800, 50);
+  x.fillText(fmt(amount), W / 2, 162);
+  x.fillStyle = '#000';
+  const left = (W - size) / 2;
+  for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (q.isDark(r, k)) x.fillRect(left + k * cell, top + r * cell, cell, cell);
+  x.fillStyle = '#1d2330'; x.font = font(600, 24);
+  x.fillText(`${bankName(to.bank)} · ${to.account}`, W / 2, top + size + 50);
+  x.fillStyle = '#6b7280'; x.font = font(400, 21);
+  x.fillText(`ND: ${noAccent(info)}`, W / 2, top + size + 88);
+  x.font = font(400, 16);
+  x.fillText('Quét bằng app ngân hàng bất kỳ · ShareBill', W / 2, top + size + 128);
+
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  const file = new File([blob], `QR_${noAccent(from.name)}_${noAccent(to.name)}.png`.replace(/ /g, '_'), { type: 'image/png' });
+  // Điện thoại: mở menu chia sẻ (Zalo, Messenger, lưu ảnh); máy tính: tải file
+  if (navigator.canShare?.({ files: [file] }) && matchMedia('(pointer: coarse)').matches) {
+    try { await navigator.share({ files: [file], title: `${from.name} → ${to.name}` }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = file.name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 
 // ---------- Render ----------
 const nameOf = id => (state.members.find(m => m.id === id) || {}).name || '?';
@@ -532,19 +600,23 @@ function renderSplit() {
   box.dataset.mode = mode;
   box.dataset.bill = state.id;
   $('btnAll').style.display = mode === 'equal' ? '' : 'none';
+  // Chọn nhanh cả nhóm (chỉ khi chia đều)
+  $('groupPicks').innerHTML = mode !== 'equal' ? '' : state.groups
+    .filter(g => state.members.some(m => m.group === g.id))
+    .map(g => `<button type="button" class="x" data-pick="${g.id}" title="Chỉ chọn nhóm này">👥 ${esc(g.name)}</button>`).join('');
 
   if (!state.members.length) {
     box.innerHTML = '<span class="muted">Chưa có thành viên. </span><button type="button" class="linklike" data-goto="members">Thêm thành viên →</button>';
     return;
   }
   if (mode === 'equal') {
-    box.innerHTML = '<div class="chips">' + state.members.map(m =>
+    box.innerHTML = '<div class="chips">' + groupedMembers().flatMap(x => x.list).map(m =>
       `<label><input type="checkbox" data-m="${m.id}" ${prev[m.id] === false ? '' : 'checked'}>${esc(m.name)}</label>`
     ).join('') + '</div>';
     return;
   }
   const shares = mode === 'shares';
-  box.innerHTML = state.members.map(m => `
+  box.innerHTML = groupedMembers().flatMap(x => x.list).map(m => `
     <div class="sp"><span>${esc(m.name)}</span>
       <input data-m="${m.id}" inputmode="${shares ? 'decimal' : 'numeric'}" autocomplete="off"
         placeholder="${shares ? '0' : 'vd: 150k'}" value="${esc(prev[m.id] ?? (shares ? '1' : ''))}">
@@ -567,8 +639,24 @@ function updateHint() {
   }
 }
 
+// Thành viên theo nhóm: [{g: nhóm | null, list}]; withEmpty: giữ cả nhóm chưa có ai
+function groupedMembers(withEmpty) {
+  const known = new Set(state.groups.map(g => g.id));
+  const out = state.groups.map(g => ({ g, list: state.members.filter(m => m.group === g.id) }));
+  out.push({ g: null, list: state.members.filter(m => !known.has(m.group)) });
+  return out.filter(x => x.list.length || (withEmpty && x.g));
+}
+const groupMemberIds = gid => state.members.filter(m => m.group === gid).map(m => m.id);
+
 function splitText(e) {
   const n = id => esc(nameOf(id));
+  if (e.mode === 'equal') {
+    const g = state.groups.find(g => {
+      const ids = groupMemberIds(g.id);
+      return ids.length && ids.length === e.split.length && ids.every(id => e.split.includes(id));
+    });
+    if (g && e.split.length !== state.members.length) return '👥 ' + esc(g.name);
+  }
   if (e.mode === 'shares') return e.split.map(id => `${n(id)} ×${e.weights[id]}`).join(', ');
   if (e.mode === 'exact') return e.split.map(id => `${n(id)} ${fmt(e.weights[id])}`).join(', ');
   return e.split.length === state.members.length ? 'Tất cả' : e.split.map(n).join(', ');
@@ -581,22 +669,41 @@ function render() {
   if (document.activeElement !== $('billName')) $('billName').value = state.name;
   if (document.activeElement !== $('billDate')) $('billDate').value = state.date;
 
-  // Thành viên
+  // Nhóm
+  const hasGroups = state.groups.length > 0;
+  const groupOpts = '<option value="">Không nhóm</option>' + state.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+  $('groupChips').innerHTML = state.groups.map(g => `
+    <span class="gchip" data-id="${g.id}">👥 ${esc(g.name)}
+      <button type="button" class="x" data-act="renameGroup" title="Đổi tên">✎</button>
+      <button type="button" class="x" data-act="delGroup" title="Xoá nhóm">✕</button></span>`).join('');
+  const prevGroup = $('memberGroup').value;
+  $('memberGroup').innerHTML = groupOpts;
+  $('memberGroup').value = state.groups.some(g => g.id === prevGroup) ? prevGroup : '';
+  $('memberGroup').hidden = !hasGroups;
+
+  // Thành viên (xếp theo nhóm)
   const bankOpts = '<option value="">— Ngân hàng —</option>' + BANKS.map(b => `<option value="${b[0]}">${b[1]}</option>`).join('');
-  $('members').innerHTML = state.members.map(m => `
+  const card = m => `
     <div class="member" data-id="${m.id}">
-      <div class="row">
+      <div class="row top-line">
         <span class="name">${esc(m.name)}</span>
+        ${hasGroups ? `<select data-f="group" title="Nhóm">${groupOpts}</select>` : ''}
         <button class="x" data-act="delMember" title="Xoá">✕</button>
       </div>
       <div class="row">
         <select data-f="bank" style="flex:1 1 160px">${bankOpts}</select>
         <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 160px" value="${esc(m.account || '')}">
       </div>
-    </div>`).join('') || '<div class="empty">Chưa có thành viên</div>';
+    </div>`;
+  $('members').innerHTML = !state.members.length ? '<div class="empty">Chưa có thành viên</div>'
+    : !hasGroups ? state.members.map(card).join('')
+    : groupedMembers(true).map(({ g, list }) => `
+        <h3 class="ghead">${g ? '👥 ' + esc(g.name) : 'Chưa xếp nhóm'} <span class="muted">· ${list.length} người</span></h3>
+        ${list.map(card).join('') || '<div class="muted" style="margin-bottom:8px">Chưa có ai, chọn nhóm ở từng thành viên.</div>'}`).join('');
   state.members.forEach(m => {
-    const sel = document.querySelector(`.member[data-id="${m.id}"] select`);
-    if (sel) sel.value = m.bank || '';
+    const el = document.querySelector(`.member[data-id="${m.id}"]`);
+    el.querySelector('[data-f=bank]').value = m.bank || '';
+    if (hasGroups) el.querySelector('[data-f=group]').value = state.groups.some(g => g.id === m.group) ? m.group : '';
   });
 
   // Form khoản chi
@@ -621,27 +728,34 @@ function render() {
 
   // Tổng kết
   const { paid, owe, transfers, payments } = compute();
-  $('summary').innerHTML = state.members.map(m => {
-    const d = paid[m.id] - owe[m.id];
-    return `<tr><td>${esc(m.name)}</td><td class="num">${fmt(paid[m.id])}</td><td class="num">${fmt(owe[m.id])}</td>
+  const sumRow = (label, ids, cls) => {
+    const p = ids.reduce((s, id) => s + paid[id], 0), o = ids.reduce((s, id) => s + owe[id], 0), d = p - o;
+    return `<tr class="${cls}"><td>${label}</td><td class="num">${fmt(p)}</td><td class="num">${fmt(o)}</td>
       <td class="num ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}">${d > 0 ? '+' : ''}${fmt(d)}</td></tr>`;
-  }).join('') || '<tr><td colspan="4" class="empty">—</td></tr>';
+  };
+  const memberRows = (list, cls = '') => list.map(m => sumRow(esc(m.name), [m.id], cls)).join('');
+  $('summary').innerHTML = !state.members.length ? '<tr><td colspan="4" class="empty">—</td></tr>'
+    : !hasGroups ? memberRows(state.members)
+    : groupedMembers().map(({ g, list }) => g
+        ? sumRow('👥 ' + esc(g.name), list.map(m => m.id), 'group-row') + memberRows(list, 'in-group')
+        : sumRow('Chưa xếp nhóm', list.map(m => m.id), 'group-row') + memberRows(list, 'in-group')).join('');
 
   // Chuyển khoản + QR
-  const billName = state.name || 'ShareBill';
   const all = transfers.length + payments.length;
   $('progress').textContent = all ? `Đã trả ${payments.length}/${all} lượt` : '';
   $('transfers').innerHTML = transfers.map(t => {
     const to = state.members.find(m => m.id === t.to);
     const from = state.members.find(m => m.id === t.from);
     const hasBank = to.bank && to.account;
-    const info = `${from.name} tra ${billName}`;
-    const qr = hasBank ? `<div class="qr">${qrSvg(vietQR(to.bank, to.account.replace(/\s/g, ''), t.amount, info))}</div>
-      <div class="bank">${esc(bankName(to.bank))} · ${esc(to.account)}<br>ND: ${esc(noAccent(info))}</div>`
+    const info = transferInfo(from);
+    const data = `data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}"`;
+    const qr = hasBank ? `<div class="qr">${qrSvg(qrPayload(to, t.amount, info))}</div>
+      <div class="bank">${esc(bankName(to.bank))} · ${esc(to.account)}<br>ND: ${esc(noAccent(info))}</div>
+      <button class="ghost" data-act="qrImg" ${data}>⬇ Tải ảnh QR</button>`
       : `<div class="bank" style="margin-top:12px">⚠️ ${esc(to.name)} chưa nhập ngân hàng / số tài khoản<br>
           <button type="button" class="linklike" data-goto="members">Nhập ngay →</button></div>`;
     return `<div class="tf"><div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(t.amount)}</div>${qr}
-      <button data-act="pay" data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}">✓ Đã trả</button></div>`;
+      <button data-act="pay" ${data}>✓ Đã trả</button></div>`;
   }).join('') || (payments.length ? '<div class="done-all">🎉 Đã thanh toán xong!</div>'
                                   : '<div class="empty">Không có khoản nào cần chuyển</div>');
   $('paidList').innerHTML = payments.map(p => `
@@ -701,7 +815,8 @@ $('memberForm').addEventListener('submit', e => {
   e.preventDefault();
   const names = $('memberName').value.split(',').map(s => s.trim()).filter(Boolean);
   if (!names.length) return;
-  names.forEach(name => state.members.push({ id: uid(), name, bank: '', account: '' }));
+  const group = $('memberGroup').value;
+  names.forEach(name => state.members.push({ id: uid(), name, bank: '', account: '', group }));
   $('memberName').value = '';
   commit();
 });
@@ -818,6 +933,41 @@ function endEdit() {
   $('expCancel').hidden = true;
   clearExpForm(true);
 }
+// ---------- Nhóm thành viên ----------
+$('groupForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('groupName').value.trim();
+  if (!name) return;
+  const g = { id: uid(), name };
+  state.groups.push(g);
+  $('groupName').value = '';
+  $('memberGroup').hidden = false;
+  commit();
+  $('memberGroup').value = g.id;   // thêm thành viên tiếp theo vào nhóm vừa tạo
+  toast(`Đã tạo nhóm “${name}”`);
+});
+$('groupChips').addEventListener('click', e => {
+  const act = e.target.dataset.act;
+  if (!act) return;
+  const g = state.groups.find(x => x.id === e.target.closest('.gchip').dataset.id);
+  if (act === 'renameGroup') {
+    const name = prompt('Tên nhóm mới:', g.name);
+    if (!name || !name.trim()) return;
+    g.name = name.trim();
+  } else if (act === 'delGroup') {
+    if (!confirm(`Xoá nhóm “${g.name}”? Thành viên trong nhóm vẫn giữ nguyên, chỉ bỏ xếp nhóm.`)) return;
+    state.groups = state.groups.filter(x => x !== g);
+    state.members.forEach(m => { if (m.group === g.id) m.group = ''; });
+  }
+  commit();
+});
+$('groupPicks').addEventListener('click', e => {
+  const gid = e.target.dataset.pick;
+  if (!gid) return;
+  const ids = new Set(groupMemberIds(gid));
+  document.querySelectorAll('#expSplit input[type=checkbox]').forEach(b => b.checked = ids.has(b.dataset.m));
+});
+
 $('btnAll').addEventListener('click', () => {
   const boxes = [...document.querySelectorAll('#expSplit input[type=checkbox]')];
   const all = boxes.every(b => b.checked);
@@ -826,6 +976,7 @@ $('btnAll').addEventListener('click', () => {
 
 $('transfers').addEventListener('click', e => {
   const d = e.target.dataset;
+  if (d.act === 'qrImg') return downloadQR(d.from, d.to, +d.amount);
   if (d.act !== 'pay') return;
   state.payments.push({ id: uid(), from: d.from, to: d.to, amount: +d.amount, at: Date.now() });
   commit();
@@ -838,6 +989,12 @@ $('paidList').addEventListener('click', e => {
 });
 
 $('btnShare').addEventListener('click', async () => {
+  // Link sửa chung: ai có link mới xem và sửa được, mọi người thấy cùng một bill
+  if (!state.online && hasFirebase() && confirm(
+    'Bật sửa chung để người nhận link cùng xem và sửa bill này?\n\n' +
+    'OK: bật sửa chung rồi copy link\nHuỷ: chỉ copy bản chụp (người nhận sửa sẽ không đồng bộ)')) {
+    if (!await goLive(false)) return;
+  }
   let hash;
   if (state.online) hash = 'b=' + state.id;
   else {
