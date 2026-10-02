@@ -1,5 +1,5 @@
 // Cache app để dùng offline
-const CACHE = 'sharebill-v5';
+const CACHE = 'sharebill-v6';
 const ASSETS = [
   './', 'index.html', 'manifest.json', 'icon.svg', 'icon-192.png', 'icon-512.png',
   'qrcode.min.js', 'jsQR.min.js', 'firebase-config.js',

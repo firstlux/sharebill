@@ -47,13 +47,21 @@
   #addFromDir button.grp { font-weight: 700; color: var(--primary); }
   .member .tag { font-size: 13px; color: var(--muted); white-space: nowrap; }
   #dirSearch { width: 100%; margin-bottom: 8px; }
-  #scanDialog, #appDialog, #settingsDialog { width: min(92vw, 420px); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+  #scanDialog, #appDialog, #settingsDialog, #payDialog { width: min(92vw, 420px); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
     background: var(--card); color: var(--text); }
-  #scanDialog::backdrop, #appDialog::backdrop, #settingsDialog::backdrop { background: rgba(0, 0, 0, .5); }
-  #scanDialog h3, #appDialog h3, #settingsDialog h3 { margin: 0 0 4px; font-size: 18px; }
+  #scanDialog::backdrop, #appDialog::backdrop, #settingsDialog::backdrop, #payDialog::backdrop { background: rgba(0, 0, 0, .5); }
+  #scanDialog h3, #appDialog h3, #settingsDialog h3, #payDialog h3 { margin: 0 0 4px; font-size: 18px; }
   .set-row { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
   .set-row select { width: 100%; }
   #scanDialog p, #appDialog p { margin: 0 0 10px; }
+  .pay-step { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; }
+  .pay-step b.n { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--primary-2); color: var(--card);
+    display: grid; place-items: center; font-size: 13px; }
+  .pay-step > div { flex: 1; min-width: 0; }
+  .pay-step button { width: 100%; margin-top: 6px; }
+  .pay-step.done b.n { background: var(--pos); }
+  .pay-copy { display: flex; gap: 8px; margin-top: 12px; }
+  .pay-copy button { flex: 1; }
   #scanVideo { width: 100%; max-height: 50vh; border-radius: 10px; background: #000; object-fit: cover; margin-bottom: 8px; }
   #scanMsg:empty { display: none; }
   .file-btn { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; font-weight: 600; }
@@ -367,10 +375,23 @@
 </dialog>
 <dialog id="appDialog">
   <h3>Mở bằng app ngân hàng nào?</h3>
-  <p class="muted">App sẽ được mở lên, số tài khoản người nhận được copy sẵn để bạn dán vào. Nhớ nhập đúng số tiền.</p>
+  <p class="muted">Chọn app bạn hay dùng, lần sau ShareBill nhớ luôn (đổi trong ⚙️ Cài đặt).</p>
   <input id="appSearch" type="search" placeholder="🔍 Tìm app…" autocomplete="off">
   <div id="appList" class="app-list"></div>
   <button type="button" class="x" id="appClose" style="width:100%;margin-top:8px">Đóng</button>
+</dialog>
+<dialog id="payDialog">
+  <h3 id="payTitle"></h3>
+  <p class="muted" style="margin:0">App ngân hàng không cho web điền sẵn lệnh chuyển, nhưng quét ảnh QR thì điền đủ STK, số tiền, nội dung:</p>
+  <div class="pay-step" id="payStep1"><b class="n">1</b><div>Lưu ảnh QR vào máy
+    <button type="button" class="ghost" id="paySave">⬇ Lưu ảnh QR</button></div></div>
+  <div class="pay-step"><b class="n">2</b><div>Mở app → <b>Quét QR</b> → bấm biểu tượng <b>🖼 ảnh</b> → chọn ảnh vừa lưu
+    <button type="button" id="payOpen"></button></div></div>
+  <div class="pay-copy">
+    <button type="button" class="x" id="payCopyAcc">📋 Copy STK</button>
+    <button type="button" class="x" id="payCopyInfo">📋 Copy nội dung</button>
+  </div>
+  <button type="button" class="x" id="payClose" style="width:100%;margin-top:8px">Đóng</button>
 </dialog>
 <div class="toast" id="toast"></div>
 
@@ -1081,7 +1102,7 @@ const transferInfo = from => `${from.name} tra ${state.name || 'ShareBill'}`;
 const qrPayload = (to, amount, info) => vietQR(to.bank, to.account.replace(/\s/g, ''), amount, info);
 
 // Ảnh PNG: tiêu đề, số tiền, mã QR, ngân hàng, nội dung — để lưu hoặc gửi qua Zalo
-async function downloadQR(fromId, toId, amount) {
+async function downloadQR(fromId, toId, amount, save) {
   const from = state.members.find(m => m.id === fromId), to = state.members.find(m => m.id === toId);
   const info = transferInfo(from);
   const q = qrcode(0, 'M'); q.addData(qrPayload(to, amount, info)); q.make();
@@ -1110,16 +1131,19 @@ async function downloadQR(fromId, toId, amount) {
 
   const blob = await new Promise(r => c.toBlob(r, 'image/png'));
   const file = new File([blob], `QR_${noAccent(from.name)}_${noAccent(to.name)}.png`.replace(/ /g, '_'), { type: 'image/png' });
-  // Điện thoại: mở menu chia sẻ (Zalo, Messenger, lưu ảnh); máy tính: tải file
-  if (navigator.canShare?.({ files: [file] }) && matchMedia('(pointer: coarse)').matches) {
-    try { await navigator.share({ files: [file], title: `${from.name} → ${to.name}` }); return; }
-    catch (e) { if (e.name === 'AbortError') return; }
+  // Điện thoại: mở menu chia sẻ (Zalo, Messenger, lưu ảnh); máy tính: tải file.
+  // save: chỉ cần lưu vào máy — Android tải thẳng (menu chia sẻ không có "lưu ảnh"), iOS vẫn qua menu ("Lưu hình ảnh")
+  if (navigator.canShare?.({ files: [file] }) && matchMedia('(pointer: coarse)').matches && (!save || isIOS())) {
+    try { await navigator.share({ files: [file], title: `${from.name} → ${to.name}` }); return true; }
+    catch (e) { if (e.name === 'AbortError') return false; }
   }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = file.name;
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return true;
 }
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
 // ---------- Render ----------
 const nameOf = id => (state.members.find(m => m.id === id) || {}).name || '?';
@@ -1496,16 +1520,46 @@ function appButtons(data) {
   return `<button class="ghost" data-act="openApp" ${data}>🏦 ${app ? 'Mở ' + esc(appName(app)) : 'Mở app ngân hàng'}</button>` +
     (app ? `<button class="x" data-act="pickApp" ${data}>đổi app</button>` : '');
 }
+// Deeplink chỉ mở được app (không truyền STK/số tiền) → hướng dẫn: lưu ảnh QR rồi quét ảnh trong app
 function openBankApp(appId, t) {
+  const to = state.members.find(m => m.id === t.to);
+  $('payDialog').dataset.t = JSON.stringify(t);
+  $('payDialog').dataset.app = appId;
+  $('payTitle').textContent = `Chuyển ${fmt(t.amount)} cho ${to.name}`;
+  $('payOpen').textContent = `🏦 Mở ${appName(appId)}`;
+  $('payStep1').classList.remove('done');
+  $('paySave').textContent = '⬇ Lưu ảnh QR';
+  $('payDialog').showModal();
+}
+function launchApp(appId, t) {
   const to = state.members.find(m => m.id === t.to), from = state.members.find(m => m.id === t.from);
   const acc = to.account.replace(/\s/g, ''), code = (BANKS.find(b => b[0] === to.bank) || [])[2];
   const url = `https://dl.vietqr.io/pay?app=${appId}&ba=${encodeURIComponent(acc)}@${code}` +
     `&am=${t.amount}&tn=${encodeURIComponent(noAccent(transferInfo(from)))}`;
-  // Link chỉ mở app, không chắc app điền sẵn thông tin: luôn copy sẵn số tài khoản để dán
-  navigator.clipboard?.writeText(acc).catch(() => {});
-  toast(`Đã copy STK ${acc} (${bankName(to.bank)}). Chuyển ${fmt(t.amount)}`);
   if (!window.open(url, '_blank')) location.href = url;
 }
+const payT = () => JSON.parse($('payDialog').dataset.t);
+function copyText(text, msg) {
+  (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+    .then(() => toast(msg), () => toast(text));
+}
+$('paySave').addEventListener('click', async () => {
+  const t = payT();
+  if (await downloadQR(t.from, t.to, t.amount, true)) {
+    $('payStep1').classList.add('done');
+    $('paySave').textContent = '✓ Đã lưu — lưu lại';
+  }
+});
+$('payOpen').addEventListener('click', () => launchApp($('payDialog').dataset.app, payT()));
+$('payCopyAcc').addEventListener('click', () => {
+  const to = state.members.find(m => m.id === payT().to), acc = to.account.replace(/\s/g, '');
+  copyText(acc, `Đã copy STK ${acc} (${bankName(to.bank)})`);
+});
+$('payCopyInfo').addEventListener('click', () => {
+  const from = state.members.find(m => m.id === payT().from);
+  copyText(noAccent(transferInfo(from)), 'Đã copy nội dung chuyển khoản');
+});
+$('payClose').addEventListener('click', () => $('payDialog').close());
 function pickApp(t) {
   $('appDialog').dataset.t = JSON.stringify(t);
   $('appSearch').value = '';
