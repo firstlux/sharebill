@@ -47,11 +47,12 @@
   #addFromDir button.grp { font-weight: 700; color: var(--primary); }
   .member .tag { font-size: 13px; color: var(--muted); white-space: nowrap; }
   #dirSearch { width: 100%; margin-bottom: 8px; }
-  .scan-btn { flex: none; padding: 6px 10px; }
-  #scanDialog, #appDialog { width: min(92vw, 420px); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+  #scanDialog, #appDialog, #settingsDialog { width: min(92vw, 420px); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
     background: var(--card); color: var(--text); }
-  #scanDialog::backdrop, #appDialog::backdrop { background: rgba(0, 0, 0, .5); }
-  #scanDialog h3, #appDialog h3 { margin: 0 0 4px; font-size: 18px; }
+  #scanDialog::backdrop, #appDialog::backdrop, #settingsDialog::backdrop { background: rgba(0, 0, 0, .5); }
+  #scanDialog h3, #appDialog h3, #settingsDialog h3 { margin: 0 0 4px; font-size: 18px; }
+  .set-row { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+  .set-row select { width: 100%; }
   #scanDialog p, #appDialog p { margin: 0 0 10px; }
   #scanVideo { width: 100%; max-height: 50vh; border-radius: 10px; background: #000; object-fit: cover; margin-bottom: 8px; }
   #scanMsg:empty { display: none; }
@@ -228,6 +229,7 @@
         <select id="billSelect" aria-label="Chọn bill khác"></select>
       </label>
       <button class="icon-btn" id="btnNew" title="Bill mới" aria-label="Bill mới">＋</button>
+      <button class="icon-btn" id="btnSettings" title="Cài đặt" aria-label="Cài đặt">⚙️</button>
     </div>
     <div class="row actions">
       <button class="ghost" id="btnShare" title="Copy link chia sẻ bill">🔗 Copy link</button>
@@ -354,6 +356,14 @@
     <span class="grow"></span>
     <button type="button" class="ghost" id="scanClose">Đóng</button>
   </div>
+</dialog>
+<dialog id="settingsDialog">
+  <h3>Cài đặt</h3>
+  <label class="set-row">
+    <span><b>App ngân hàng của bạn</b><br><span class="muted">Dùng cho nút “🏦 Mở app” ở mỗi mã QR (trên điện thoại)</span></span>
+    <select id="setBankApp"></select>
+  </label>
+  <button type="button" class="ghost" id="settingsClose" style="width:100%;margin-top:14px">Xong</button>
 </dialog>
 <dialog id="appDialog">
   <h3>Mở bằng app ngân hàng nào?</h3>
@@ -1286,9 +1296,9 @@ function renderPeople() {
   const bankRow = x => `
       <div class="row">
         <select data-f="bank" style="flex:1 1 160px">${bankOpts}</select>
-        <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 140px" value="${esc(x.account || '')}">
-        <button type="button" class="ghost scan-btn" data-scan title="Quét QR ngân hàng để tự điền">📷</button>
+        <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 160px" value="${esc(x.account || '')}">
       </div>`;
+  const scanBtn = '<button type="button" class="x" data-scan title="Quét QR ngân hàng để tự điền ngân hàng + số tài khoản">📷</button>';
   // Nhóm danh bạ + ô chọn nhóm cho người mới
   $('groupChips').innerHTML = store.groups.map(g => `
     <span class="gchip" data-id="${g.id}">👥 ${esc(g.name)}
@@ -1321,6 +1331,7 @@ function renderPeople() {
     <div class="member" data-id="${m.id}">
       <div class="row top-line">
         <span class="name">${esc(m.name)}${m.id === store.me[state.id] ? ' <span class="tag">(bạn)</span>' : ''}</span>
+        ${scanBtn}
         <button class="x" data-act="renameMember" title="Đổi tên">✎</button>
         ${personOf(m) ? '' : '<button class="x" data-act="saveDir" title="Lưu người này vào danh bạ của bạn">📇 Lưu danh bạ</button>'}
         <button class="x" data-act="delMember" title="Bỏ khỏi bill">✕</button>
@@ -1349,6 +1360,7 @@ function renderPeople() {
     <div class="member" data-id="${p.id}">
       <div class="row top-line">
         <span class="name">${esc(p.name)}</span>
+        ${scanBtn}
         <button class="x" data-act="renamePerson" title="Đổi tên">✎</button>
         <button class="x" data-act="delPerson" title="Xoá khỏi danh bạ">✕</button>
       </div>
@@ -1516,6 +1528,20 @@ $('appList').addEventListener('click', e => {
   openBankApp(id, JSON.parse($('appDialog').dataset.t));
 });
 $('appClose').addEventListener('click', () => $('appDialog').close());
+
+// ---------- Cài đặt ----------
+$('btnSettings').addEventListener('click', () => {
+  $('setBankApp').innerHTML = '<option value="">— Hỏi mỗi lần bấm —</option>' +
+    BANK_APPS.map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join('');
+  $('setBankApp').value = savedApp() || '';
+  $('settingsDialog').showModal();
+});
+$('setBankApp').addEventListener('change', e => {
+  try { e.target.value ? localStorage.setItem(APP_KEY, e.target.value) : localStorage.removeItem(APP_KEY); } catch (err) {}
+  render();
+  toast(e.target.value ? `Đã chọn ${appName(e.target.value)}` : 'Sẽ hỏi app mỗi lần bấm');
+});
+$('settingsClose').addEventListener('click', () => $('settingsDialog').close());
 
 // ---------- "Bạn là ai trong bill?" (lưu trên máy, không đồng bộ) ----------
 const meOf = () => state.members.find(m => m.id === store.me[state.id]);
