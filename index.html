@@ -46,6 +46,22 @@
   #addFromDir button:hover { border-color: var(--primary); background: var(--chip); }
   #addFromDir button.grp { font-weight: 700; color: var(--primary); }
   .member .tag { font-size: 13px; color: var(--muted); white-space: nowrap; }
+  #whoDialog { width: min(92vw, 380px); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+    background: var(--card); color: var(--text); }
+  #whoDialog::backdrop { background: rgba(0, 0, 0, .5); }
+  #whoDialog h3 { margin: 0 0 4px; font-size: 18px; }
+  #whoDialog p { margin: 0 0 12px; }
+  .who-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .who-list button { background: var(--chip); color: var(--text); border: 1px solid var(--line); padding: 10px; }
+  .who-list button:hover { border-color: var(--primary); background: var(--chip); }
+  #whoSkip { margin-top: 10px; width: 100%; }
+  .me-card { border-color: var(--primary); }
+  .me-card.gone { display: none; }   /* setTab bật/tắt [hidden], nên ẩn ô này bằng class riêng */
+  .me-card .me-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 16px; }
+  .me-card .me-line { padding: 4px 0; }
+  .me-card .me-line b { color: var(--primary); }
+  .tf.mine { border: 2px solid var(--primary); }
+  .tf .mine-tag { font-size: 12px; font-weight: 700; color: var(--primary); }
   .pair { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
   .pair .qr { background: #fff; border-radius: 8px; padding: 8px; flex: none; }
   .pair .qr svg { display: block; width: 160px; height: 160px; }
@@ -211,6 +227,8 @@
     <div id="people"></div>
   </section>
 
+  <section class="card me-card gone" data-page="bill" id="meCard"></section>
+
   <section class="card" data-page="bill">
     <h2>1. Khoản chi</h2>
     <form class="row exp-form" id="expForm">
@@ -255,6 +273,16 @@
     <div class="paid-list" id="paidList"></div>
   </section>
 </div>
+<dialog id="whoDialog">
+  <h3>Bạn là ai trong bill này?</h3>
+  <p class="muted" id="whoBill"></p>
+  <div id="whoList" class="who-list"></div>
+  <form id="whoNewForm" class="row">
+    <input id="whoNewName" class="grow" placeholder="Chưa có tên bạn? Nhập để thêm vào bill" autocomplete="off">
+    <button class="ghost">Thêm</button>
+  </form>
+  <button type="button" class="x" id="whoSkip">Chỉ xem, bỏ qua</button>
+</dialog>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -327,6 +355,7 @@ const parseShare = s => { const n = parseFloat(String(s).replace(',', '.')); ret
 const KEY = 'sharebill-v2', OLD_KEY = 'sharebill-v1';
 let store = { current: null, bills: [] };
 let state;
+let askWho = null;   // bill vừa mở lần đầu từ link: hỏi "bạn là ai" khi đã có danh sách thành viên
 
 const pad2 = n => String(n).padStart(2, '0');
 const isoDate = t => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
@@ -352,6 +381,9 @@ function load() {
     else { const old = localStorage.getItem(OLD_KEY); if (old) store.bills = [JSON.parse(old)]; }
   } catch (e) {}
   store.bills = (store.bills || []).map(normalize);
+  // billId -> id thành viên "là tôi" trên máy này ('' = không hỏi / chỉ xem).
+  // Bill đã có sẵn trên máy (tự tạo) thì không hỏi; chỉ hỏi bill mở từ link.
+  if (!store.me) { store.me = {}; store.bills.forEach(b => store.me[b.id] = ''); }
   seedDirectory();
 
   const liveId = location.hash.match(/^#b=([\w-]{16,})$/);
@@ -364,15 +396,17 @@ function load() {
   } else if (liveId) {
     // Link bill sửa chung: dữ liệu sẽ được tải từ Firebase
     const id = liveId[1];
-    if (!store.bills.some(b => b.id === id))
+    if (!store.bills.some(b => b.id === id)) {
       store.bills.unshift({ ...newBill(), id, name: 'Đang tải…', online: true });
+      askWho = id;
+    }
     store.current = id;
     history.replaceState(null, '', location.pathname);
   } else if (location.hash.length > 1) {
     importSnapshot(location.hash.slice(1));
     history.replaceState(null, '', location.pathname);
   }
-  if (!store.bills.length) store.bills.push(newBill());
+  if (!store.bills.length) { const b = newBill(); store.bills.push(b); store.me[b.id] = ''; }
   selectBill(store.current);
   save();
 }
@@ -384,7 +418,7 @@ function importSnapshot(hash) {
     const json = decodeURIComponent(escape(atob(hash.replace(/-/g,'+').replace(/_/g,'/'))));
     const b = normalize(JSON.parse(json));
     const i = store.bills.findIndex(x => x.id === b.id);
-    if (i >= 0) store.bills[i] = b; else store.bills.unshift(b);
+    if (i >= 0) store.bills[i] = b; else { store.bills.unshift(b); askWho = b.id; }
     store.current = b.id;
     toast(i >= 0 ? 'Đã cập nhật bill từ link' : 'Đã mở bill từ link');
     return true;
@@ -399,13 +433,16 @@ function openLink(text) {
   let m;
   if ((m = text.match(/#b=([\w-]{16,})/))) {
     const id = m[1];
-    if (!store.bills.some(b => b.id === id)) store.bills.unshift({ ...newBill(), id, name: 'Đang tải…', online: true });
+    if (!store.bills.some(b => b.id === id)) {
+      store.bills.unshift({ ...newBill(), id, name: 'Đang tải…', online: true });
+      askWho = id;
+    }
     endEdit(); selectBill(id); commit(); setTab('bill');
     return;
   }
   if ((m = text.match(/#d=([\w-]{16,})/))) return joinDir(m[1]);
   const h = text.indexOf('#');
-  if (h >= 0 && importSnapshot(text.slice(h + 1))) { endEdit(); selectBill(store.current); commit(); setTab('bill'); return; }
+  if (h >= 0 && importSnapshot(text.slice(h + 1))) { endEdit(); selectBill(store.current); commit(); setTab('bill'); maybeAskWho(); return; }
   if (h < 0) toast('Link không hợp lệ');
 }
 function joinDir(id) {
@@ -570,7 +607,7 @@ async function connectLive() {
     Object.assign(bill, fromRemote(val));
     setLast(bill.id, flatten(toRemote(bill)));
     save();
-    if (state === bill) renderSoon();
+    if (state === bill) { renderSoon(); maybeAskWho(); }
   }, e => { console.warn(e); renderLive('Không có quyền truy cập bill'); }));
   live.unsub.push(fb.onValue(fb.ref(fb.db, '.info/connected'), s => renderLive(null, s.val())));
 }
@@ -1019,7 +1056,7 @@ function render() {
   const prevPayer = $('expPayer').value;
   $('expPayer').innerHTML = '<option value="">Người trả…</option>' +
     state.members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
-  $('expPayer').value = state.members.some(m => m.id === prevPayer) ? prevPayer : '';
+  $('expPayer').value = state.members.some(m => m.id === prevPayer) ? prevPayer : (!editingId && meOf()?.id) || '';
   renderSplit();
 
   // Danh sách khoản chi
@@ -1037,6 +1074,11 @@ function render() {
 
   // Tổng kết
   const { paid, owe, transfers, payments } = compute();
+  renderMe(transfers, paid, owe);
+  // Lượt chuyển của "tôi" lên đầu
+  const meId = meOf()?.id;
+  const isMine = t => meId && (t.from === meId || t.to === meId);
+  transfers.sort((a, b) => isMine(b) - isMine(a));
   const sumRow = (label, ids, cls) => {
     const p = ids.reduce((s, id) => s + paid[id], 0), o = ids.reduce((s, id) => s + owe[id], 0), d = p - o;
     return `<tr class="${cls}"><td>${label}</td><td class="num">${fmt(p)}</td><td class="num">${fmt(o)}</td>
@@ -1063,7 +1105,9 @@ function render() {
       <button class="ghost" data-act="qrImg" ${data}>⬇ Tải ảnh QR</button>`
       : `<div class="bank" style="margin-top:12px">⚠️ ${esc(to.name)} chưa nhập ngân hàng / số tài khoản<br>
           <button type="button" class="linklike" data-goto="members">Nhập ngay →</button></div>`;
-    return `<div class="tf"><div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(t.amount)}</div>${qr}
+    return `<div class="tf${isMine(t) ? ' mine' : ''}" id="tf-${t.from}-${t.to}">
+      ${isMine(t) ? `<div class="mine-tag">${t.from === meId ? 'BẠN CẦN CHUYỂN' : 'BẠN SẼ NHẬN'}</div>` : ''}
+      <div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(t.amount)}</div>${qr}
       <button data-act="pay" ${data}>✓ Đã trả</button></div>`;
   }).join('') || (payments.length ? '<div class="done-all">🎉 Đã thanh toán xong!</div>'
                                   : '<div class="empty">Không có khoản nào cần chuyển</div>');
@@ -1120,7 +1164,7 @@ function renderPeople() {
     return `
     <div class="member" data-id="${m.id}">
       <div class="row top-line">
-        <span class="name">${esc(m.name)}</span>
+        <span class="name">${esc(m.name)}${m.id === store.me[state.id] ? ' <span class="tag">(bạn)</span>' : ''}</span>
         ${bg && !showHeads ? `<span class="tag">👥 ${esc(bg.name)}</span>` : ''}
         <button class="x" data-act="renameMember" title="Đổi tên">✎</button>
         ${personOf(m) ? '' : '<button class="x" data-act="saveDir" title="Lưu người này vào danh bạ của bạn">📇 Lưu danh bạ</button>'}
@@ -1152,6 +1196,72 @@ function renderPeople() {
   });
 }
 
+// ---------- "Bạn là ai trong bill?" (lưu trên máy, không đồng bộ) ----------
+const meOf = () => state.members.find(m => m.id === store.me[state.id]);
+function maybeAskWho() {
+  if (!askWho || askWho !== state.id || !state.members.length || state.id in store.me) return;
+  askWho = null;
+  showWho();
+}
+function showWho() {
+  $('whoBill').textContent = `${state.name || 'Bill'} · ${viDate(state.date)}`;
+  $('whoList').innerHTML = state.members.map(m =>
+    `<button type="button" data-who="${m.id}">${esc(m.name)}</button>`).join('');
+  $('whoNewName').value = '';
+  $('whoDialog').dataset.bill = state.id;
+  if (!$('whoDialog').open) $('whoDialog').showModal();
+}
+function setMe(id) {
+  store.me[$('whoDialog').dataset.bill] = id;
+  save();
+  $('whoDialog').close();
+  render();
+  const me = meOf();
+  if (me) toast(`Chào ${me.name}! Phần của bạn ở đầu trang.`);
+}
+$('whoList').addEventListener('click', e => { const id = e.target.dataset.who; if (id) setMe(id); });
+$('whoNewForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('whoNewName').value.trim();
+  if (!name) return;
+  const m = { id: uid(), name, bank: '', account: '', group: '' };
+  state.members.push(m);
+  commit();
+  setMe(m.id);
+});
+$('whoSkip').addEventListener('click', () => setMe(''));
+// Đóng bằng Esc / nút Back: coi như chỉ xem, không hỏi lại
+$('whoDialog').addEventListener('cancel', e => { e.preventDefault(); setMe(''); });
+
+// Ô "Phần của bạn" đầu tab Bill
+function renderMe(transfers, paid, owe) {
+  const card = $('meCard'), me = meOf();
+  if (!me) {
+    // Bill mở từ link mà chưa chọn (vd tải lại trang khi đang hỏi): nhắc chọn
+    const ask = state.members.length > 0 && store.me[state.id] === undefined;
+    card.classList.toggle('gone', !ask);
+    if (ask) card.innerHTML = `<div class="me-head">👤 Bạn là ai trong bill này?
+      <button type="button" class="linklike" data-act="who">Chọn tên của bạn →</button></div>`;
+    return;
+  }
+  card.classList.remove('gone');
+  const name = id => esc(nameOf(id));
+  const out = transfers.filter(t => t.from === me.id), inc = transfers.filter(t => t.to === me.id);
+  card.innerHTML = `
+    <div class="me-head">👤 Bạn là <b>${esc(me.name)}</b>
+      <button type="button" class="linklike" data-act="who">đổi</button></div>
+    ${out.map(t => `<div class="me-line">Bạn cần chuyển <b>${fmt(t.amount)}</b> cho <b>${name(t.to)}</b>
+      · <button type="button" class="linklike" data-scroll="tf-${t.from}-${t.to}">Xem QR ↓</button></div>`).join('')}
+    ${inc.map(t => `<div class="me-line"><b>${name(t.from)}</b> sẽ chuyển cho bạn <b>${fmt(t.amount)}</b></div>`).join('')}
+    ${!out.length && !inc.length ? `<div class="me-line">✓ Bạn không cần chuyển hay nhận thêm.</div>` : ''}
+    <div class="muted" style="margin-top:6px">Bạn đã chi ${fmt(paid[me.id] || 0)} · Phần của bạn ${fmt(owe[me.id] || 0)}</div>`;
+}
+$('meCard').addEventListener('click', e => {
+  if (e.target.dataset.act === 'who') return showWho();
+  const id = e.target.dataset.scroll;
+  if (id) $(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+
 // ---------- Tab Bill / Thành viên / Danh bạ ----------
 const TAB_KEY = 'sharebill-tab';
 function setTab(t) {
@@ -1181,6 +1291,7 @@ $('btnNew').addEventListener('click', () => {
   endEdit();
   const b = newBill();
   store.bills.unshift(b);
+  store.me[b.id] = '';
   selectBill(b.id);
   commit();
   setTab('members');
@@ -1195,7 +1306,7 @@ $('btnDelete').addEventListener('click', () => {
   try { localStorage.removeItem(LIVE_KEY + state.id); } catch (e) {}
   endEdit();
   store.bills = store.bills.filter(b => b.id !== state.id);
-  if (!store.bills.length) store.bills.push(newBill());
+  if (!store.bills.length) { const b = newBill(); store.bills.push(b); store.me[b.id] = ''; }
   selectBill(store.bills[0].id);
   commit();
 });
@@ -1502,6 +1613,7 @@ setTab(savedTab);
 tabForBill();
 if (openTab) setTab(openTab);
 connectDir();
+maybeAskWho();
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(console.warn);
