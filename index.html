@@ -205,6 +205,7 @@
   .live-status.off b { color: var(--neg); }
   .empty { color: var(--muted); text-align: center; padding: 12px; }
   .total { font-weight: 700; }
+  .show-sm { display: none; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
     background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 8px;
     opacity: 0; transition: opacity .2s; pointer-events: none; }
@@ -220,8 +221,15 @@
     #personForm .grow, #memberForm .grow { flex-basis: 100%; }
     #personForm select, #memberForm select { flex: 1; }
     #billName { font-size: 18px; }
-    .exp-form > * { flex: 1 1 100%; }
+    .exp-form { flex-wrap: wrap; }
+    .exp-form > * { flex: 1 1 auto; }
+    .exp-form #expDesc { flex: 1 1 60%; }
+    .exp-form #expAmount { flex: 0 1 40%; width: auto; }
+    .exp-form #expPayer { flex: 1 1 50%; }
+    .exp-form #expSubmit { flex: 1 1 50%; margin-top: 4px; }
+    .exp-form #expCancel { flex: 1 1 50%; margin-top: 4px; }
     .hide-sm { display: none; }
+    .show-sm { display: table-cell; }
   }
 </style>
 </head>
@@ -1158,11 +1166,27 @@ function renderBills() {
 }
 
 // Ô chia tiền theo cách chia đang chọn; giữ lại giá trị đã nhập khi render lại
+let splitModeData = { equal: {}, shares: {}, exact: {} };  // lưu data của cả 3 mode
 function renderSplit() {
   const box = $('expSplit'), mode = $('expMode').value;
   const prev = {};
-  if (box.dataset.mode === mode && box.dataset.bill === state.id)
+  if (box.dataset.mode === mode && box.dataset.bill === state.id) {
     box.querySelectorAll('[data-m]').forEach(i => prev[i.dataset.m] = i.type === 'checkbox' ? i.checked : i.value);
+  } else if (box.dataset.bill === state.id) {
+    // Mode đã chuyển: lấy data từ mode cũ (nếu có) để làm mặc định
+    const prevMode = box.dataset.mode;
+    if (prevMode && splitModeData[prevMode]) {
+      Object.assign(prev, splitModeData[prevMode]);
+    }
+  }
+
+  // Lưu data của mode hiện tại trước khi render lại
+  if (box.dataset.mode && splitModeData[box.dataset.mode]) {
+    box.querySelectorAll('[data-m]').forEach(i => {
+      splitModeData[box.dataset.mode][i.dataset.m] = i.type === 'checkbox' ? i.checked : i.value;
+    });
+  }
+
   box.dataset.mode = mode;
   box.dataset.bill = state.id;
   $('btnAll').style.display = mode === 'equal' ? '' : 'none';
@@ -1233,6 +1257,23 @@ function splitText(e) {
   return e.split.length === state.members.length ? 'Tất cả' : e.split.map(n).join(', ');
 }
 
+// Phiên bản ngắn cho mobile: hiển thị 2 ký tự đầu của tên hoặc biểu tượng nhóm
+function splitTextShort(e) {
+  const short = id => {
+    const name = nameOf(id);
+    return name.length > 0 ? name.substring(0, 1).toUpperCase() : '?';
+  };
+  if (e.mode === 'equal') {
+    const g = state.groups.find(g => {
+      const ids = groupMemberIds(g.id);
+      return ids.length && ids.length === e.split.length && ids.every(id => e.split.includes(id));
+    });
+    if (g && e.split.length !== state.members.length) return '👥';
+  }
+  if (e.split.length === state.members.length) return '👥';
+  return e.split.slice(0, 2).map(short).join('') + (e.split.length > 2 ? '+' : '');
+}
+
 function render() {
   renderPending = false;
   renderBills();
@@ -1257,11 +1298,12 @@ function render() {
       <td>${esc(e.desc || '(không tên)')}</td>
       <td>${esc(nameOf(e.payer))}</td>
       <td class="hide-sm muted">${splitText(e)}</td>
+      <td class="show-sm muted" style="font-size:12px; font-weight:600; letter-spacing:1px" title="${splitText(e)}">${splitTextShort(e)}</td>
       <td class="num">${fmt(e.amount)}</td>
       <td class="acts"><button class="x" data-act="editExp" title="Sửa">✎</button><button class="x" data-act="delExp" title="Xoá">✕</button></td>
     </tr>`).join('') +
-    (state.expenses.length ? `<tr><td class="total" colspan="3">Tổng cộng</td><td class="num total">${fmt(total)}</td><td></td></tr>`
-      : '<tr><td colspan="5" class="empty">Chưa có khoản chi</td></tr>');
+    (state.expenses.length ? `<tr><td class="total" colspan="4">Tổng cộng</td><td class="num total">${fmt(total)}</td><td></td></tr>`
+      : '<tr><td colspan="6" class="empty">Chưa có khoản chi</td></tr>');
 
   // Tổng kết
   const { paid, owe, transfers, payments } = compute();
@@ -2015,6 +2057,8 @@ function clearExpForm(resetSplit) {
   $('expDesc').value = ''; $('expAmount').value = '';
   // vẽ lại ô chia với giá trị mặc định ở lần render sau
   if (resetSplit || $('expMode').value === 'exact') $('expSplit').dataset.mode = '';
+  // Reset split mode data khi tạo expense mới
+  if (resetSplit) splitModeData = { equal: {}, shares: {}, exact: {} };
 }
 function startEdit(id) {
   const e = state.expenses.find(x => x.id === id);
