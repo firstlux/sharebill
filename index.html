@@ -393,6 +393,25 @@
   </div>
   <button type="button" class="x" id="payClose" style="width:100%;margin-top:8px">Đóng</button>
 </dialog>
+<dialog id="partialPayDialog">
+  <h3>Chuyển bao nhiêu?</h3>
+  <p class="muted" id="partialPayInfo" style="margin:8px 0"></p>
+  <div class="row" style="margin-bottom:12px">
+    <input id="partialPayAmount" inputmode="numeric" placeholder="Số tiền" autocomplete="off" class="grow" style="flex:1">
+  </div>
+  <div class="row">
+    <button type="button" class="ghost" id="partialPayCancel" style="flex:1">Huỷ</button>
+    <button type="button" id="partialPayConfirm" style="flex:1">✓ Ghi nhận</button>
+  </div>
+</dialog>
+<dialog id="confirmPayDialog">
+  <h3 id="confirmPayTitle"></h3>
+  <p class="muted" id="confirmPayInfo" style="margin:8px 0"></p>
+  <div class="row">
+    <button type="button" class="ghost" id="confirmPaySkip" style="flex:1">Chưa nhận</button>
+    <button type="button" id="confirmPayConfirm" style="flex:1">✓ Đã nhận</button>
+  </div>
+</dialog>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1284,31 +1303,45 @@ function render() {
         : sumRow('Chưa xếp nhóm', list.map(m => m.id), 'group-row') + memberRows(list, 'in-group')).join('');
 
   // Chuyển khoản + QR
+  // Tính phần chưa trả (sau khi trừ partial payments đã ghi nhận)
+  const remainingTransfer = t => {
+    const paid = state.payments.filter(p => p.from === t.from && p.to === t.to && p.status !== 'cancelled').reduce((s, p) => s + p.amount, 0);
+    return Math.max(0, t.amount - paid);
+  };
+
   const all = transfers.length + payments.length;
   $('progress').textContent = all ? `Đã trả ${payments.length}/${all} lượt` : '';
   $('transfers').innerHTML = transfers.map(t => {
+    const remaining = remainingTransfer(t);
+    if (remaining <= 0) return '';  // Đã trả đủ, không show transfer này
+
     const to = state.members.find(m => m.id === t.to);
     const from = state.members.find(m => m.id === t.from);
     const hasBank = to.bank && to.account;
     const info = transferInfo(from);
-    const data = `data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}"`;
-    const qr = hasBank ? `<div class="qr">${qrSvg(qrPayload(to, t.amount, info))}</div>
+    const data = `data-from="${t.from}" data-to="${t.to}" data-amount="${remaining}"`;
+    const qr = hasBank ? `<div class="qr">${qrSvg(qrPayload(to, remaining, info))}</div>
       <div class="bank">${esc(bankName(to.bank))} · ${esc(to.account)}<br>ND: ${esc(noAccent(info))}</div>
       <button class="ghost" data-act="qrImg" ${data}>⬇ Tải ảnh QR</button>${appButtons(data)}`
       : `<div class="bank" style="margin-top:12px">⚠️ ${esc(to.name)} chưa nhập ngân hàng / số tài khoản<br>
           <button type="button" class="linklike" data-goto="members">Nhập ngay →</button></div>`;
     return `<div class="tf${isMine(t) ? ' mine' : ''}" id="tf-${t.from}-${t.to}">
       ${isMine(t) ? `<div class="mine-tag">${t.from === meId ? 'BẠN CẦN CHUYỂN' : 'BẠN SẼ NHẬN'}</div>` : ''}
-      <div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(t.amount)}</div>${qr}
+      <div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(remaining)}</div>${qr}
       <button data-act="pay" ${data}>✓ Đã trả</button></div>`;
-  }).join('') || (payments.length ? '<div class="done-all">🎉 Đã thanh toán xong!</div>'
+  }).filter(x => x).join('') || (payments.length ? '<div class="done-all">🎉 Đã thanh toán xong!</div>'
                                   : '<div class="empty">Không có khoản nào cần chuyển</div>');
-  $('paidList').innerHTML = payments.map(p => `
+  $('paidList').innerHTML = payments.map(p => {
+    const statusIcon = p.status === 'pending' ? '❌' : '✓';
+    const statusClass = p.status === 'pending' ? 'neg' : 'pos';
+    return `
     <div class="paid">
-      <span class="who"><b>✓</b> ${esc(nameOf(p.from))} → ${esc(nameOf(p.to))} · ${fmt(p.amount)}
-        <span class="muted">· ${new Date(p.at).toLocaleDateString('vi-VN')}</span></span>
+      <span class="who"><b class="${statusClass}">${statusIcon}</b> ${esc(nameOf(p.from))} → ${esc(nameOf(p.to))} · ${fmt(p.amount)}
+        <span class="muted">· ${new Date(p.at).toLocaleDateString('vi-VN')}</span>
+        ${p.status === 'pending' ? `<span class="muted"> (chờ ${esc(nameOf(p.to))} confirm)</span>` : ''}</span>
       <button class="x" data-act="undo" data-id="${p.id}">Hoàn tác</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 // Trang "Thành viên của bill" và trang "Danh bạ"
@@ -1648,19 +1681,31 @@ function renderMe(transfers, paid, owe) {
   card.classList.remove('gone');
   const name = id => esc(nameOf(id));
   const out = transfers.filter(t => t.from === me.id), inc = transfers.filter(t => t.to === me.id);
+
+  // Tìm các khoản chưa confirm từ người khác chuyển cho bạn
+  const pendingToMe = state.payments.filter(p => p.to === me.id && p.status === 'pending');
+
   card.innerHTML = `
     <div class="me-head">👤 Bạn là <b>${esc(me.name)}</b>
       <button type="button" class="linklike" data-act="who">đổi</button></div>
     ${out.map(t => `<div class="me-line">Bạn cần chuyển <b>${fmt(t.amount)}</b> cho <b>${name(t.to)}</b>
       · <button type="button" class="linklike" data-scroll="tf-${t.from}-${t.to}">Xem QR ↓</button></div>`).join('')}
     ${inc.map(t => `<div class="me-line"><b>${name(t.from)}</b> sẽ chuyển cho bạn <b>${fmt(t.amount)}</b></div>`).join('')}
-    ${!out.length && !inc.length ? `<div class="me-line">✓ Bạn không cần chuyển hay nhận thêm.</div>` : ''}
+    ${pendingToMe.length ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)"><div class="muted" style="margin-bottom:6px">Chờ bạn xác nhận:</div>
+      ${pendingToMe.map(p => `<div class="me-line"><b>${name(p.from)}</b> chuyển <b>${fmt(p.amount)}</b>
+        · <button type="button" class="linklike" data-confirm="${p.id}">Xác nhận ↓</button></div>`).join('')}</div>` : ''}
+    ${!out.length && !inc.length && !pendingToMe.length ? `<div class="me-line">✓ Bạn không cần chuyển hay nhận thêm.</div>` : ''}
     <div class="muted" style="margin-top:6px">Bạn đã chi ${fmt(paid[me.id] || 0)} · Phần của bạn ${fmt(owe[me.id] || 0)}</div>`;
 }
 $('meCard').addEventListener('click', e => {
   if (e.target.dataset.act === 'who') return showWho();
   const id = e.target.dataset.scroll;
   if (id) $(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const confirmId = e.target.dataset.confirm;
+  if (confirmId) {
+    const p = state.payments.find(x => x.id === confirmId);
+    if (p) showConfirmPayDialog(p);
+  }
 });
 
 // ---------- Báo cáo còn nợ: tổng hợp mọi bill trên máy ----------
@@ -2088,6 +2133,63 @@ $('btnAll').addEventListener('click', () => {
   boxes.forEach(b => b.checked = !all);
 });
 
+// Xử lý thanh toán: hỏi số tiền nếu partial, hoặc ghi nhận toàn bộ
+let pendingPay = null;
+function showPartialPayDialog(t) {
+  pendingPay = t;
+  $('partialPayAmount').value = fmtNum(t.amount);
+  $('partialPayInfo').textContent = `Chuyển từ ${nameOf(t.from)} cho ${nameOf(t.to)}. Tất cả: ${fmt(t.amount)}`;
+  $('partialPayDialog').showModal();
+}
+$('partialPayConfirm').addEventListener('click', () => {
+  if (!pendingPay) return;
+  const amount = parseAmount($('partialPayAmount').value);
+  if (!amount || amount > pendingPay.amount) {
+    toast('Số tiền không hợp lệ');
+    return;
+  }
+  const t = pendingPay;
+  const paymentId = uid();
+  state.payments.push({ id: paymentId, from: t.from, to: t.to, amount, at: Date.now(), status: 'pending' });
+
+  // Nếu trả từng phần, cập nhật transfer để giảm lại
+  if (amount < t.amount) {
+    const transfer = state.expenses[0] ? state.expenses[0] : null;  // tìm lại transfer trong compute
+    const { transfers } = compute();
+    const idx = transfers.findIndex(x => x.from === t.from && x.to === t.to && x.amount === t.amount);
+    if (idx >= 0) {
+      transfers[idx].amount -= amount;
+      // Cập nhật lại bảng transfers bằng cách re-render
+    }
+  }
+
+  commit();
+  $('partialPayDialog').close();
+  pendingPay = null;
+  toast(`Đã ghi nhận ${nameOf(t.from)} trả ${fmt(amount)}`);
+});
+$('partialPayCancel').addEventListener('click', () => $('partialPayDialog').close());
+
+// Xử lý xác nhận thanh toán từ người nhận
+let pendingConfirm = null;
+function showConfirmPayDialog(p) {
+  pendingConfirm = p;
+  const from = nameOf(p.from);
+  $('confirmPayTitle').textContent = `${from} chuyển ${fmt(p.amount)} cho bạn`;
+  $('confirmPayInfo').textContent = p.amount > 0 ? `Ngày: ${new Date(p.at).toLocaleDateString('vi-VN')}` : '';
+  $('confirmPayDialog').showModal();
+}
+$('confirmPayConfirm').addEventListener('click', () => {
+  if (!pendingConfirm) return;
+  const p = state.payments.find(x => x.id === pendingConfirm.id);
+  if (p) p.status = 'confirmed';
+  commit();
+  $('confirmPayDialog').close();
+  pendingConfirm = null;
+  toast('✓ Đã xác nhận nhận tiền');
+});
+$('confirmPaySkip').addEventListener('click', () => $('confirmPayDialog').close());
+
 $('transfers').addEventListener('click', e => {
   const d = e.target.dataset;
   if (d.act === 'qrImg') return downloadQR(d.from, d.to, +d.amount);
@@ -2097,9 +2199,8 @@ $('transfers').addEventListener('click', e => {
     return app ? openBankApp(app, t) : pickApp(t);
   }
   if (d.act !== 'pay') return;
-  state.payments.push({ id: uid(), from: d.from, to: d.to, amount: +d.amount, at: Date.now() });
-  commit();
-  toast(`Đã ghi nhận ${nameOf(d.from)} trả ${fmt(+d.amount)}`);
+  const t = { from: d.from, to: d.to, amount: +d.amount };
+  showPartialPayDialog(t);
 });
 $('paidList').addEventListener('click', e => {
   if (e.target.dataset.act !== 'undo') return;
