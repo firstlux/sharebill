@@ -329,7 +329,7 @@
     <div id="expSplit"></div>
     <div style="margin-top:12px; overflow-x:auto">
       <table>
-        <thead><tr><th>Nội dung</th><th>Người trả</th><th class="hide-sm">Chia cho</th><th class="num">Số tiền</th><th></th></tr></thead>
+        <thead><tr><th>Nội dung</th><th>Người trả</th><th class="hide-sm">Chia cho</th><th class="show-sm">Chia</th><th class="num">Số tiền</th><th></th></tr></thead>
         <tbody id="expenses"></tbody>
       </table>
     </div>
@@ -531,7 +531,7 @@ function formatAmountInput(el, ev) {
   for (let seen = 0; pos < out.length && seen < before; pos++) if (/\d/.test(out[pos])) seen++;
   el.setSelectionRange(pos, pos);
 }
-const isAmountInput = el => el.id === 'expAmount' || (el.dataset?.m && el.type !== 'checkbox' && $('expMode').value === 'exact');
+const isAmountInput = el => el.id === 'expAmount' || el.id === 'partialPayAmount' || (el.dataset?.m && el.type !== 'checkbox' && $('expMode').value === 'exact');
 document.addEventListener('input', e => { if (isAmountInput(e.target)) formatAmountInput(e.target, e); });
 document.addEventListener('focusout', e => {
   if (!isAmountInput(e.target)) return;
@@ -1189,21 +1189,11 @@ let splitModeData = { equal: {}, shares: {}, exact: {} };  // lưu data của c�
 function renderSplit() {
   const box = $('expSplit'), mode = $('expMode').value;
   const prev = {};
-  if (box.dataset.mode === mode && box.dataset.bill === state.id) {
-    box.querySelectorAll('[data-m]').forEach(i => prev[i.dataset.m] = i.type === 'checkbox' ? i.checked : i.value);
-  } else if (box.dataset.bill === state.id) {
-    // Mode đã chuyển: lấy data từ mode cũ (nếu có) để làm mặc định
-    const prevMode = box.dataset.mode;
-    if (prevMode && splitModeData[prevMode]) {
-      Object.assign(prev, splitModeData[prevMode]);
-    }
-  }
-
-  // Lưu data của mode hiện tại trước khi render lại
-  if (box.dataset.mode && splitModeData[box.dataset.mode]) {
-    box.querySelectorAll('[data-m]').forEach(i => {
-      splitModeData[box.dataset.mode][i.dataset.m] = i.type === 'checkbox' ? i.checked : i.value;
-    });
+  if (box.dataset.bill === state.id && splitModeData[box.dataset.mode]) {
+    // Lưu số đang nhập của kiểu chia cũ; đổi kiểu chia rồi đổi lại thì không mất
+    const saved = splitModeData[box.dataset.mode] = {};
+    box.querySelectorAll('[data-m]').forEach(i => saved[i.dataset.m] = i.type === 'checkbox' ? i.checked : i.value);
+    Object.assign(prev, splitModeData[mode]);
   }
 
   box.dataset.mode = mode;
@@ -1345,42 +1335,33 @@ function render() {
         : sumRow('Chưa xếp nhóm', list.map(m => m.id), 'group-row') + memberRows(list, 'in-group')).join('');
 
   // Chuyển khoản + QR
-  // Tính phần chưa trả (sau khi trừ partial payments đã ghi nhận)
-  const remainingTransfer = t => {
-    const paid = state.payments.filter(p => p.from === t.from && p.to === t.to && p.status !== 'cancelled').reduce((s, p) => s + p.amount, 0);
-    return Math.max(0, t.amount - paid);
-  };
-
   const all = transfers.length + payments.length;
   $('progress').textContent = all ? `Đã trả ${payments.length}/${all} lượt` : '';
   $('transfers').innerHTML = transfers.map(t => {
-    const remaining = remainingTransfer(t);
-    if (remaining <= 0) return '';  // Đã trả đủ, không show transfer này
-
     const to = state.members.find(m => m.id === t.to);
     const from = state.members.find(m => m.id === t.from);
     const hasBank = to.bank && to.account;
     const info = transferInfo(from);
-    const data = `data-from="${t.from}" data-to="${t.to}" data-amount="${remaining}"`;
-    const qr = hasBank ? `<div class="qr">${qrSvg(qrPayload(to, remaining, info))}</div>
+    const data = `data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}"`;
+    const qr = hasBank ? `<div class="qr">${qrSvg(qrPayload(to, t.amount, info))}</div>
       <div class="bank">${esc(bankName(to.bank))} · ${esc(to.account)}<br>ND: ${esc(noAccent(info))}</div>
       <button class="ghost" data-act="qrImg" ${data}>⬇ Tải ảnh QR</button>${appButtons(data)}`
       : `<div class="bank" style="margin-top:12px">⚠️ ${esc(to.name)} chưa nhập ngân hàng / số tài khoản<br>
           <button type="button" class="linklike" data-goto="members">Nhập ngay →</button></div>`;
     return `<div class="tf${isMine(t) ? ' mine' : ''}" id="tf-${t.from}-${t.to}">
       ${isMine(t) ? `<div class="mine-tag">${t.from === meId ? 'BẠN CẦN CHUYỂN' : 'BẠN SẼ NHẬN'}</div>` : ''}
-      <div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(remaining)}</div>${qr}
+      <div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(t.amount)}</div>${qr}
       <button data-act="pay" ${data}>✓ Đã trả</button></div>`;
-  }).filter(x => x).join('') || (payments.length ? '<div class="done-all">🎉 Đã thanh toán xong!</div>'
+  }).join('') || (payments.length ? '<div class="done-all">🎉 Đã thanh toán xong!</div>'
                                   : '<div class="empty">Không có khoản nào cần chuyển</div>');
   $('paidList').innerHTML = payments.map(p => {
-    const statusIcon = p.status === 'pending' ? '❌' : '✓';
-    const statusClass = p.status === 'pending' ? 'neg' : 'pos';
+    const statusIcon = p.status === 'pending' ? '⏳' : '✓';
+    const statusClass = p.status === 'pending' ? 'muted' : 'pos';
     return `
     <div class="paid">
       <span class="who"><b class="${statusClass}">${statusIcon}</b> ${esc(nameOf(p.from))} → ${esc(nameOf(p.to))} · ${fmt(p.amount)}
         <span class="muted">· ${new Date(p.at).toLocaleDateString('vi-VN')}</span>
-        ${p.status === 'pending' ? `<span class="muted"> (chờ ${esc(nameOf(p.to))} confirm)</span>` : ''}</span>
+        ${p.status === 'pending' ? `<span class="muted"> (chờ ${esc(nameOf(p.to))} xác nhận)</span>` : ''}</span>
       <button class="x" data-act="undo" data-id="${p.id}">Hoàn tác</button>
     </div>`;
   }).join('');
@@ -2102,8 +2083,8 @@ function clearExpForm(resetSplit) {
   $('expDesc').value = ''; $('expAmount').value = '';
   // vẽ lại ô chia với giá trị mặc định ở lần render sau
   if (resetSplit || $('expMode').value === 'exact') $('expSplit').dataset.mode = '';
-  // Reset split mode data khi tạo expense mới
-  if (resetSplit) splitModeData = { equal: {}, shares: {}, exact: {} };
+  // Số đã nhập ở các kiểu chia khác thuộc khoản vừa lưu: quên đi
+  splitModeData = { equal: {}, shares: {}, exact: {} };
 }
 function startEdit(id) {
   const e = state.expenses.find(x => x.id === id);
@@ -2114,6 +2095,7 @@ function startEdit(id) {
   $('expPayer').value = e.payer;
   $('expMode').value = e.mode;
   $('expSplit').dataset.mode = '';
+  splitModeData = { equal: {}, shares: {}, exact: {} };
   renderSplit();
   $('expSplit').querySelectorAll('[data-m]').forEach(i => {
     const m = i.dataset.m;
@@ -2193,19 +2175,7 @@ $('partialPayConfirm').addEventListener('click', () => {
     return;
   }
   const t = pendingPay;
-  const paymentId = uid();
-  state.payments.push({ id: paymentId, from: t.from, to: t.to, amount, at: Date.now(), status: 'pending' });
-
-  // Nếu trả từng phần, cập nhật transfer để giảm lại
-  if (amount < t.amount) {
-    const transfer = state.expenses[0] ? state.expenses[0] : null;  // tìm lại transfer trong compute
-    const { transfers } = compute();
-    const idx = transfers.findIndex(x => x.from === t.from && x.to === t.to && x.amount === t.amount);
-    if (idx >= 0) {
-      transfers[idx].amount -= amount;
-      // Cập nhật lại bảng transfers bằng cách re-render
-    }
-  }
+  state.payments.push({ id: uid(), from: t.from, to: t.to, amount, at: Date.now(), status: 'pending' });
 
   commit();
   $('partialPayDialog').close();
