@@ -79,8 +79,8 @@
   #whoDialog h3 { margin: 0 0 4px; font-size: 18px; }
   #whoDialog p { margin: 0 0 12px; }
   .who-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; }
-  .who-list button { background: var(--chip); color: var(--text); border: 1px solid var(--line); padding: 10px; }
-  .who-list button:hover { border-color: var(--primary); background: var(--chip); }
+  .who-list button { background: var(--card); color: var(--text); border: 1px solid var(--line); padding: 12px 10px; border-radius: 10px; cursor: pointer; font-weight: 500; transition: all 0.15s; }
+  .who-list button:hover { border-color: var(--primary); background: var(--chip); box-shadow: 0 2px 8px rgba(15, 118, 110, 0.1); }
   #whoSkip { margin-top: 10px; width: 100%; }
   .me-card { border-color: var(--primary); }
   .me-card.gone { display: none; }   /* setTab bật/tắt [hidden], nên ẩn ô này bằng class riêng */
@@ -248,11 +248,12 @@
       <button class="icon-btn" id="btnSettings" title="Cài đặt" aria-label="Cài đặt">⚙️</button>
     </div>
     <div class="row actions">
-      <button class="ghost" id="btnShare" title="Copy link chia sẻ bill">🔗 Copy link</button>
-      <button class="ghost" id="btnLive" hidden title="Đưa bill lên mạng để cả nhóm cùng sửa">☁️ Bật sửa chung</button>
+      <button class="ghost" id="btnShare" title="Chia sẻ bill với nhóm">🔗 Copy link</button>
+      <button class="ghost" id="btnLive" hidden title="Cho phép nhóm sửa bill cùng lúc từ các thiết bị khác nhau">☁️ Bật sửa chung</button>
       <span id="liveStatus" class="live-status" hidden title="Chỉ ai có link mới xem và sửa được bill này"></span>
       <button class="x" id="btnDelete" title="Xoá bill">Xoá bill</button>
     </div>
+    <div id="liveHint" class="muted" style="font-size:13px;margin-top:6px;display:none">💡 Bật sửa chung trước để nhóm cùng xem & sửa bill realtime qua link.</div>
   </header>
 
   <nav class="tabs" role="tablist">
@@ -308,6 +309,18 @@
 
   <section class="card me-card gone" data-page="bill" id="meCard"></section>
 
+  <section class="card" data-page="bill" id="emptyCard" hidden>
+    <div style="text-align: center; padding: 20px 0;">
+      <div style="font-size: 40px; margin-bottom: 12px;">📇</div>
+      <h3 style="margin: 0 0 8px; font-size: 18px;">Chưa có ai trong bill</h3>
+      <p class="muted" style="margin: 0 0 16px;">Hãy thêm thành viên để bắt đầu chia tiền.</p>
+      <div class="row" style="justify-content: center; gap: 8px; flex-wrap: wrap;">
+        <button type="button" class="ghost" id="emptyAddFromDir" style="font-size: 14px;">Thêm từ danh bạ</button>
+        <button type="button" class="ghost" id="emptyAddNew" style="font-size: 14px;">Nhập tên mới</button>
+      </div>
+    </div>
+  </section>
+
   <section class="card" data-page="bill">
     <h2>1. Khoản chi</h2>
     <form class="row exp-form" id="expForm">
@@ -353,14 +366,15 @@
   </section>
 </div>
 <dialog id="whoDialog">
-  <h3>Bạn là ai trong bill này?</h3>
+  <h3>👤 Bạn là ai trong bill này?</h3>
+  <p class="muted" style="margin-bottom:12px">Chọn tên để app nhớ đó là bạn. Những lần sau mở bill sẽ tự nhớ.</p>
   <p class="muted" id="whoBill"></p>
   <div id="whoList" class="who-list"></div>
-  <form id="whoNewForm" class="row">
-    <input id="whoNewName" class="grow" placeholder="Chưa có tên bạn? Nhập để thêm vào bill" autocomplete="off">
+  <form id="whoNewForm" class="row" style="margin-top:12px">
+    <input id="whoNewName" class="grow" placeholder="Chưa có tên bạn? Nhập tên để thêm" autocomplete="off">
     <button class="ghost">Thêm</button>
   </form>
-  <button type="button" class="x" id="whoSkip">Chỉ xem, bỏ qua</button>
+  <button type="button" class="ghost" id="whoSkip" style="width:100%;margin-top:12px">Chỉ xem, bỏ qua</button>
 </dialog>
 <dialog id="scanDialog">
   <h3>Quét QR tài khoản ngân hàng</h3>
@@ -823,7 +837,7 @@ async function connectLive() {
 // Trả về true nếu bật thành công. ask = false khi đã hỏi người dùng ở chỗ gọi.
 async function goLive(ask = true) {
   if (!state.members.length && !state.expenses.length && !state.name) { toast('Nhập tên bill hoặc thành viên trước'); return false; }
-  if (ask !== false && !confirm('Đưa bill lên mạng? Chỉ ai có link mới xem và sửa được bill này.')) return false;
+  if (ask !== false && !confirm('Bật sửa chung?\n\nNhóm sẽ cùng xem & sửa bill realtime qua link. Chỉ ai có link mới truy cập được.')) return false;
   const oldId = state.id;
   try {
     await firebase();
@@ -833,7 +847,7 @@ async function goLive(ask = true) {
     setLast(id, flatten(toRemote(state)));
     selectBill(id);
     commit();
-    toast('Đã bật sửa chung, bấm “Copy link” để gửi nhóm');
+    toast('✓ Đã bật sửa chung. Bấm “Copy link” để chia sẻ với nhóm.');
     return true;
   } catch (e) {
     console.warn(e);
@@ -1036,6 +1050,7 @@ document.addEventListener('focusout', () => {
 
 function renderLive(error, connected) {
   $('btnLive').hidden = !hasFirebase() || !!state.online;
+  $('liveHint').style.display = (hasFirebase() && !state.online && state.members.length) ? '' : 'none';
   const s = $('liveStatus');
   s.hidden = !state.online;
   if (!state.online) return;
@@ -1299,6 +1314,9 @@ function render() {
     state.members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
   $('expPayer').value = state.members.some(m => m.id === prevPayer) ? prevPayer : (!editingId && meOf()?.id) || '';
   renderSplit();
+
+  // Show/hide empty state card
+  $('emptyCard').hidden = state.members.length > 0;
 
   // Danh sách khoản chi
   const total = state.expenses.reduce((s, e) => s + e.amount, 0);
@@ -1693,9 +1711,16 @@ $('whoDialog').addEventListener('cancel', e => { e.preventDefault(); setMe(''); 
 // Ô "Phần của bạn" đầu tab Bill
 function renderMe(transfers, paid, owe) {
   const card = $('meCard'), me = meOf();
+
+  // Empty state: chưa có thành viên
+  if (!state.members.length) {
+    card.classList.add('gone');
+    return;
+  }
+
   if (!me) {
     // Bill mở từ link mà chưa chọn (vd tải lại trang khi đang hỏi): nhắc chọn
-    const ask = state.members.length > 0 && store.me[state.id] === undefined;
+    const ask = store.me[state.id] === undefined;
     card.classList.toggle('gone', !ask);
     if (ask) card.innerHTML = `<div class="me-head">👤 Bạn là ai trong bill này?
       <button type="button" class="linklike" data-act="who">Chọn tên của bạn →</button></div>`;
@@ -1729,6 +1754,16 @@ $('meCard').addEventListener('click', e => {
     const p = state.payments.find(x => x.id === confirmId);
     if (p) showConfirmPayDialog(p);
   }
+});
+
+// Empty state card handlers
+$('emptyAddFromDir').addEventListener('click', () => setTab('members'));
+$('emptyAddNew').addEventListener('click', () => {
+  setTab('members');
+  setTimeout(() => {
+    $('memberName').focus();
+    $('memberName').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 100);
 });
 
 // ---------- Báo cáo còn nợ: tổng hợp mọi bill trên máy ----------
@@ -2225,8 +2260,8 @@ $('paidList').addEventListener('click', e => {
 $('btnShare').addEventListener('click', async () => {
   // Link sửa chung: ai có link mới xem và sửa được, mọi người thấy cùng một bill
   if (!state.online && hasFirebase() && confirm(
-    'Bật sửa chung để người nhận link cùng xem và sửa bill này?\n\n' +
-    'OK: bật sửa chung rồi copy link\nHuỷ: chỉ copy bản chụp (người nhận sửa sẽ không đồng bộ)')) {
+    'Bật sửa chung để nhóm cùng xem & sửa bill realtime?\n\n' +
+    'OK: bật sửa chung rồi copy link\nHuỷ: chỉ copy bản chụp (mọi người xem bill hiện tại, nhưng không đồng bộ)')) {
     if (!await goLive(false)) return;
   }
   let hash;
@@ -2246,8 +2281,14 @@ $('btnShare').addEventListener('click', async () => {
       if (e.name === 'NotAllowedError') return toast('Đã bật sửa chung, bấm “Chia sẻ” lần nữa để gửi');
     }
   }
-  try { await navigator.clipboard.writeText(url); toast('Đã copy link bill'); }
-  catch { prompt('Copy link này:', url); }
+  try {
+    await navigator.clipboard.writeText(url);
+    if (state.online) {
+      toast('✓ Link sửa chung đã copy. Ai có link sẽ xem & sửa bill realtime.');
+    } else {
+      toast('ℹ️ Link bản chụp đã copy. Bật “Sửa chung” trước để share realtime.');
+    }
+  } catch { prompt('Copy link này:', url); }
 });
 function canShare() { return !!navigator.share && matchMedia('(pointer: coarse)').matches; }
 if (canShare()) $('btnShare').textContent = '📤 Chia sẻ';
