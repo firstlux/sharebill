@@ -83,7 +83,7 @@
   .who-list button:hover { border-color: var(--primary); background: var(--chip); box-shadow: 0 2px 8px rgba(15, 118, 110, 0.1); }
   #whoSkip { margin-top: 10px; width: 100%; }
   .me-card { border-color: var(--primary); }
-  .me-card.gone { display: none; }   /* setTab bật/tắt [hidden], nên ẩn ô này bằng class riêng */
+  .me-card.gone, #emptyCard.gone { display: none; }   /* setTab bật/tắt [hidden], nên ẩn ô này bằng class riêng */
   .me-card .me-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 16px; }
   .me-card .me-line { padding: 4px 0; }
   .me-card .me-line b { color: var(--primary); }
@@ -309,7 +309,7 @@
 
   <section class="card me-card gone" data-page="bill" id="meCard"></section>
 
-  <section class="card" data-page="bill" id="emptyCard" hidden>
+  <section class="card gone" data-page="bill" id="emptyCard">
     <div style="text-align: center; padding: 20px 0;">
       <div style="font-size: 40px; margin-bottom: 12px;">📇</div>
       <h3 style="margin: 0 0 8px; font-size: 18px;">Chưa có ai trong bill</h3>
@@ -1316,7 +1316,8 @@ function render() {
   renderSplit();
 
   // Show/hide empty state card
-  $('emptyCard').hidden = state.members.length > 0;
+  $('emptyCard').classList.toggle('gone', state.members.length > 0);
+  $('liveHint').style.display = (hasFirebase() && !state.online && state.members.length) ? '' : 'none';
 
   // Danh sách khoản chi
   const total = state.expenses.reduce((s, e) => s + e.amount, 0);
