@@ -62,6 +62,26 @@
   .me-card .me-line b { color: var(--primary); }
   .tf.mine { border: 2px solid var(--primary); }
   .tf .mine-tag { font-size: 12px; font-weight: 700; color: var(--primary); }
+  .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+  .tile { background: var(--chip); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .tile .v { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .tile .k { font-size: 13px; color: var(--muted); }
+  .rp { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; }
+  .rp summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; cursor: pointer; list-style: none; }
+  .rp summary::-webkit-details-marker { display: none; }
+  .rp summary::before { content: '▸'; color: var(--muted); transition: transform .15s; }
+  .rp[open] summary::before { transform: rotate(90deg); }
+  .rp summary .name { font-weight: 600; flex: 1; min-width: 100px; }
+  .rp .amt { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .rp .body { padding: 0 12px 12px 30px; }
+  .rp-line { padding: 3px 0; font-size: 14px; }
+  .rp-line .when { color: var(--muted); font-size: 13px; }
+  .rb { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: transparent; color: var(--text);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font-weight: 400; }
+  .rb:hover { background: var(--chip); }
+  .rb .name { flex: 1; font-weight: 600; }
+  .rb.done { opacity: .6; }
+  .rb .amt { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .pair { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
   .pair .qr { background: #fff; border-radius: 8px; padding: 8px; flex: none; }
   .pair .qr svg { display: block; width: 160px; height: 160px; }
@@ -159,6 +179,10 @@
   @media (max-width: 560px) {
     .tabs button { padding: 8px 4px; font-size: 14px; }
     .tabs .count { display: none; }
+    .tabs .ico { display: none; }
+    .tile { padding: 8px; }
+    .tile .v { font-size: 15px; }
+    .tile .k { font-size: 12px; }
     #personForm .grow, #memberForm .grow { flex-basis: 100%; }
     #personForm select, #memberForm select { flex: 1; }
     #billName { font-size: 18px; }
@@ -189,9 +213,10 @@
   </header>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="bill">🧾 Bill</button>
-    <button role="tab" data-tab="members">👥 Thành viên <span class="count" id="memberCount"></span></button>
-    <button role="tab" data-tab="dir">📇 Danh bạ <span class="count" id="dirCount"></span></button>
+    <button role="tab" data-tab="bill"><span class="ico">🧾 </span>Bill</button>
+    <button role="tab" data-tab="members"><span class="ico">👥 </span>Thành viên <span class="count" id="memberCount"></span></button>
+    <button role="tab" data-tab="dir"><span class="ico">📇 </span>Danh bạ <span class="count" id="dirCount"></span></button>
+    <button role="tab" data-tab="report"><span class="ico">📊 </span>Báo cáo</button>
   </nav>
 
   <section class="card" data-page="members">
@@ -225,6 +250,15 @@
       <button>Thêm</button>
     </form>
     <div id="people"></div>
+  </section>
+
+  <section class="card" data-page="report">
+    <h2>Báo cáo còn nợ <small id="reportNote"></small></h2>
+    <div class="tiles" id="reportTiles"></div>
+    <h3 class="ghead">Theo người</h3>
+    <div id="reportPeople"></div>
+    <h3 class="ghead" style="margin-top:20px">Theo bill</h3>
+    <div id="reportBills"></div>
   </section>
 
   <section class="card me-card gone" data-page="bill" id="meCard"></section>
@@ -856,11 +890,12 @@ function shareOf(e, ids) {
   return out;
 }
 
-function compute() {
-  const ids = new Set(state.members.map(m => m.id));
+// Tính cho 1 bill (mặc định bill đang mở)
+function compute(b = state) {
+  const ids = new Set(b.members.map(m => m.id));
   const paid = {}, owe = {}, net = {};
   ids.forEach(id => { paid[id] = 0; owe[id] = 0; });
-  for (const e of state.expenses) {
+  for (const e of b.expenses) {
     if (!ids.has(e.payer)) continue;
     const sh = shareOf(e, ids);
     if (!sh) continue;
@@ -869,13 +904,13 @@ function compute() {
   }
   ids.forEach(id => net[id] = paid[id] - owe[id]);
   // Các khoản đã chuyển trả làm giảm số còn nợ / còn được nhận
-  const payments = state.payments.filter(p => ids.has(p.from) && ids.has(p.to));
+  const payments = b.payments.filter(p => ids.has(p.from) && ids.has(p.to));
   payments.forEach(p => { net[p.from] += p.amount; net[p.to] -= p.amount; });
 
   // Tối giản: ghép người nợ nhiều nhất với người được nhận nhiều nhất
-  const bal = state.members.map(m => ({ id: m.id, v: net[m.id] }));
-  const cred = bal.filter(b => b.v > 0).sort((a, b) => b.v - a.v);
-  const debt = bal.filter(b => b.v < 0).map(b => ({ ...b, v: -b.v })).sort((a, b) => b.v - a.v);
+  const bal = b.members.map(m => ({ id: m.id, v: net[m.id] }));
+  const cred = bal.filter(x => x.v > 0).sort((x, y) => y.v - x.v);
+  const debt = bal.filter(x => x.v < 0).map(x => ({ ...x, v: -x.v })).sort((x, y) => y.v - x.v);
   const transfers = [];
   let i = 0, j = 0;
   while (i < debt.length && j < cred.length) {
@@ -1075,6 +1110,7 @@ function render() {
   // Tổng kết
   const { paid, owe, transfers, payments } = compute();
   renderMe(transfers, paid, owe);
+  if (reportVisible()) renderReport();
   // Lượt chuyển của "tôi" lên đầu
   const meId = meOf()?.id;
   const isMine = t => meId && (t.from === meId || t.to === meId);
@@ -1262,12 +1298,124 @@ $('meCard').addEventListener('click', e => {
   if (id) $(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 
-// ---------- Tab Bill / Thành viên / Danh bạ ----------
+// ---------- Báo cáo còn nợ: tổng hợp mọi bill trên máy ----------
+// Cùng một người ở nhiều bill được gộp theo danh bạ (pid).
+function buildReport() {
+  const people = new Map(), bills = [];
+  const memberOf = (b, id) => b.members.find(x => x.id === id);
+  const nameFor = (b, id) => { const m = memberOf(b, id); return ((m && personOf(m)) || m || {}).name || '?'; };
+  const entry = (b, id) => {
+    const m = memberOf(b, id), key = m ? pidOf(m) : id;
+    if (!people.has(key)) people.set(key, { key, name: nameFor(b, id), owe: 0, recv: 0, lines: [] });
+    return people.get(key);
+  };
+  for (const b of store.bills) {
+    if (!b.members.length || !b.expenses.length) continue;
+    const { transfers, payments } = compute(b);
+    bills.push({ b, left: transfers.reduce((s, t) => s + t.amount, 0), done: payments.length, all: payments.length + transfers.length });
+    for (const t of transfers) {
+      const from = entry(b, t.from), to = entry(b, t.to);
+      from.owe += t.amount; to.recv += t.amount;
+      from.lines.push({ b, owe: true, other: nameFor(b, t.to), amount: t.amount });
+      to.lines.push({ b, owe: false, other: nameFor(b, t.from), amount: t.amount });
+    }
+  }
+  return {
+    people: [...people.values()].filter(p => p.owe || p.recv).sort((x, y) => y.owe - x.owe || y.recv - x.recv),
+    bills: bills.sort((x, y) => (y.left > 0) - (x.left > 0) || y.b.date.localeCompare(x.b.date)),
+  };
+}
+const reportVisible = () => !$('reportTiles').closest('section').hidden;
+function renderReport() {
+  const { people, bills } = buildReport();
+  const total = bills.reduce((s, x) => s + x.left, 0);
+  $('reportNote').textContent = `${store.bills.length} bill trên máy này`;
+  $('reportTiles').innerHTML = [
+    [fmt(total), 'Tổng còn phải chuyển'],
+    [`${bills.filter(x => x.left).length}/${bills.length}`, 'Bill chưa xong'],
+    [people.filter(p => p.owe).length, 'Người còn nợ'],
+  ].map(([v, k]) => `<div class="tile"><div class="v">${v}</div><div class="k">${k}</div></div>`).join('');
+
+  const billTag = b => `${esc(b.name || 'Bill chưa đặt tên')} <span class="when">· ${viDate(b.date)}</span>`;
+  const opened = new Set([...$('reportPeople').querySelectorAll('details[open]')].map(d => d.dataset.key));
+  $('reportPeople').innerHTML = people.map(p => `
+    <details class="rp" data-key="${esc(p.key)}" ${opened.has(p.key) ? 'open' : ''}>
+      <summary><span class="name">${esc(p.name)}</span>
+        ${p.owe ? `<span class="amt neg">nợ ${fmt(p.owe)}</span>` : ''}
+        ${p.recv ? `<span class="amt pos">được nhận ${fmt(p.recv)}</span>` : ''}</summary>
+      <div class="body">
+        ${p.lines.map(l => `<div class="rp-line">${billTag(l.b)}: ${l.owe ? 'chuyển cho' : 'nhận từ'} <b>${esc(l.other)}</b>
+          <span class="amt ${l.owe ? 'neg' : 'pos'}">${fmt(l.amount)}</span></div>`).join('')}
+        ${p.owe ? `<button class="ghost" data-remind="${esc(p.key)}" style="margin-top:8px">📤 Nhắc nợ</button>` : ''}
+      </div>
+    </details>`).join('') || '<div class="empty">🎉 Không ai còn nợ</div>';
+
+  $('reportBills').innerHTML = bills.map(x => `
+    <button class="rb ${x.left ? '' : 'done'}" data-open="${x.b.id}">
+      <span class="name">${billTag(x.b)}</span>
+      <span class="muted">${x.done}/${x.all} lượt</span>
+      <span class="amt ${x.left ? 'neg' : 'pos'}">${x.left ? 'còn ' + fmt(x.left) : '✓ Xong'}</span>
+    </button>`).join('') || '<div class="empty">Chưa có bill nào có khoản chi</div>';
+}
+
+// Tin nhắc nợ cho 1 người: liệt kê từng khoản, kèm link bill sửa chung để mở QR
+async function remind(key) {
+  const p = buildReport().people.find(x => x.key === key);
+  if (!p) return;
+  const lines = p.lines.filter(l => l.owe);
+  const links = [...new Set(lines.filter(l => l.b.online)
+    .map(l => `${l.b.name || 'Bill'}: ${location.origin + location.pathname}#b=${l.b.id}`))];
+  const text = `Nhắc nhẹ ${p.name} 🙏 còn các khoản chưa chuyển:\n` +
+    lines.map(l => `• ${l.b.name || 'Bill'} (${viDate(l.b.date)}): chuyển ${l.other} ${fmt(l.amount)}`).join('\n') +
+    `\nTổng: ${fmt(p.owe)}` + (links.length ? `\n\nMở để quét QR chuyển khoản:\n${links.join('\n')}` : '');
+  if (canShare()) {
+    try { await navigator.share({ text }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(text); toast('Đã copy tin nhắc nợ, dán vào Zalo để gửi'); }
+  catch { prompt('Copy tin nhắn này:', text); }
+}
+
+// Bill sửa chung không mở gần đây: tải số liệu mới nhất (vd người khác vừa bấm "Đã trả")
+let reportFetchedAt = 0;
+async function refreshOnlineBills() {
+  const list = store.bills.filter(b => b.online && b !== state);
+  if (!list.length || !hasFirebase() || Date.now() - reportFetchedAt < 30000) return;
+  reportFetchedAt = Date.now();
+  $('reportNote').textContent += ' · đang cập nhật bill sửa chung…';
+  try { await firebase(); } catch (e) { return renderReport(); }
+  await Promise.all(list.map(async b => {
+    try {
+      const ref = fb.ref(fb.db, 'bills/' + b.id);
+      // Thay đổi còn chờ gửi của bill này (vd sửa danh bạ) thì gửi trước
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem(LIVE_KEY + b.id)); } catch (e) {}
+      if (saved) { const u = diff(flatten(toRemote(b)), saved); if (Object.keys(u).length) await fb.update(ref, u); }
+      const val = (await fb.get(ref)).val();
+      if (!val || b === state) return;
+      Object.assign(b, fromRemote(val));
+      try { localStorage.setItem(LIVE_KEY + b.id, JSON.stringify(flatten(toRemote(b)))); } catch (e) {}
+    } catch (e) { console.warn(e); }
+  }));
+  save();
+  renderReport();
+}
+
+$('reportPeople').addEventListener('click', e => { const k = e.target.dataset.remind; if (k) remind(k); });
+$('reportBills').addEventListener('click', e => {
+  const b = e.target.closest('[data-open]');
+  if (!b) return;
+  endEdit(); selectBill(b.dataset.open); commit(); setTab('bill');
+  scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+// ---------- Tab Bill / Thành viên / Danh bạ / Báo cáo ----------
 const TAB_KEY = 'sharebill-tab';
 function setTab(t) {
   document.querySelectorAll('[data-page]').forEach(s => s.hidden = s.dataset.page !== t);
   document.querySelectorAll('.tabs [data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
   try { localStorage.setItem(TAB_KEY, t); } catch (e) {}
+  if (t === 'report') { renderReport(); refreshOnlineBills(); }
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-tab], [data-goto]');
