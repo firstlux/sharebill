@@ -32,8 +32,13 @@
   header { margin-bottom: 12px; }
   header .top { flex-wrap: nowrap; }
   header .logo { font-size: 24px; flex: none; }
-  #billName { font-size: 20px; font-weight: 700; background: transparent; border-color: transparent; padding: 6px 8px; }
-  #billName:hover { border-color: var(--line); }
+  :root { color-scheme: light dark; }
+  .title-box { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+  #billName { width: 100%; font-size: 20px; font-weight: 700; background: transparent; border-color: transparent; padding: 4px 8px; }
+  #billDate { font-size: 13px; color: var(--muted); background: transparent; border-color: transparent; padding: 0 8px; }
+  #billName:hover, #billDate:hover { border-color: var(--line); }
+  tr.editing td { background: var(--chip); }
+  td.acts { white-space: nowrap; text-align: right; }
   .icon-btn { position: relative; flex: none; width: 40px; height: 40px; padding: 0; display: inline-flex;
     align-items: center; justify-content: center; font-size: 18px; font-weight: 400; cursor: pointer;
     background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 10px; }
@@ -122,7 +127,10 @@
   <header>
     <div class="row top">
       <span class="logo" aria-hidden="true">🧾</span>
-      <input id="billName" class="grow" placeholder="Tên bill, vd: Đi Đà Lạt" aria-label="Tên bill">
+      <div class="title-box grow">
+        <input id="billName" placeholder="Tên bill, vd: Đi Đà Lạt" aria-label="Tên bill">
+        <input id="billDate" type="date" aria-label="Ngày bill" title="Ngày bill">
+      </div>
       <label class="icon-btn picker" title="Chọn bill khác">📂<span class="badge" id="billCount" hidden></span>
         <select id="billSelect" aria-label="Chọn bill khác"></select>
       </label>
@@ -157,7 +165,8 @@
       <input id="expDesc" class="grow" placeholder="Nội dung, vd: Ăn tối" autocomplete="off">
       <input id="expAmount" inputmode="numeric" placeholder="Số tiền" style="width:140px" autocomplete="off">
       <select id="expPayer" title="Người trả"></select>
-      <button>Thêm</button>
+      <button id="expSubmit">Thêm</button>
+      <button type="button" class="ghost" id="expCancel" hidden>Huỷ</button>
     </form>
     <div class="split-head">
       <select id="expMode" title="Cách chia">
@@ -232,10 +241,13 @@ const KEY = 'sharebill-v2', OLD_KEY = 'sharebill-v1';
 let store = { current: null, bills: [] };
 let state;
 
-const newBill = () => ({ id: uid(), name: '', created: Date.now(), members: [], expenses: [], payments: [] });
+const pad2 = n => String(n).padStart(2, '0');
+const isoDate = t => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+const viDate = iso => iso.split('-').reverse().join('/');
+const newBill = () => ({ id: uid(), name: '', created: Date.now(), date: isoDate(Date.now()), members: [], expenses: [], payments: [] });
 function normalize(b) {
   // bổ sung field còn thiếu cho dữ liệu cũ (v1, link cũ)
-  b.id ||= uid(); b.created ||= Date.now(); b.name ||= '';
+  b.id ||= uid(); b.created ||= Date.now(); b.name ||= ''; b.date ||= isoDate(b.created);
   b.members ||= []; b.expenses ||= []; b.payments ||= [];
   b.expenses.forEach(e => { e.mode ||= 'equal'; e.split ||= []; });
   return b;
@@ -308,7 +320,7 @@ const stable = v => Array.isArray(v) ? '[' + v.map(stable).join(',') + ']'
   : JSON.stringify(v);
 
 function toRemote(b) {
-  const r = { name: b.name, created: b.created };
+  const r = { name: b.name, created: b.created, date: b.date };
   let t = Date.now();
   for (const c of COLS) {
     r[c] = {};
@@ -318,12 +330,13 @@ function toRemote(b) {
 }
 function fromRemote(val) {
   const b = { name: val.name || '', created: val.created || Date.now() };
+  b.date = val.date || isoDate(b.created);
   for (const c of COLS) b[c] = Object.values(val[c] || {}).sort((x, y) => x.o - y.o);
   return b;
 }
 // Phẳng hoá thành {đường dẫn: JSON} để tính phần thay đổi
 function flatten(r) {
-  const f = { name: stable(r.name), created: stable(r.created) };
+  const f = { name: stable(r.name), created: stable(r.created), date: stable(r.date) };
   for (const c of COLS) for (const id in r[c]) f[`${c}/${id}`] = stable(r[c][id]);
   return f;
 }
@@ -501,7 +514,7 @@ function qrSvg(text) {
 
 // ---------- Render ----------
 const nameOf = id => (state.members.find(m => m.id === id) || {}).name || '?';
-const billLabel = b => `${b.name || 'Bill chưa đặt tên'} · ${new Date(b.created).toLocaleDateString('vi-VN')}`;
+const billLabel = b => `${b.name || 'Bill chưa đặt tên'} · ${viDate(b.date)}`;
 
 function renderBills() {
   $('billSelect').innerHTML = store.bills.map(b =>
@@ -566,6 +579,7 @@ function render() {
   renderBills();
   $('memberCount').textContent = state.members.length ? `(${state.members.length})` : '';
   if (document.activeElement !== $('billName')) $('billName').value = state.name;
+  if (document.activeElement !== $('billDate')) $('billDate').value = state.date;
 
   // Thành viên
   const bankOpts = '<option value="">— Ngân hàng —</option>' + BANKS.map(b => `<option value="${b[0]}">${b[1]}</option>`).join('');
@@ -595,12 +609,12 @@ function render() {
   // Danh sách khoản chi
   const total = state.expenses.reduce((s, e) => s + e.amount, 0);
   $('expenses').innerHTML = state.expenses.map(e => `
-    <tr data-id="${e.id}">
+    <tr data-id="${e.id}" class="${e.id === editingId ? 'editing' : ''}">
       <td>${esc(e.desc || '(không tên)')}</td>
       <td>${esc(nameOf(e.payer))}</td>
       <td class="hide-sm muted">${splitText(e)}</td>
       <td class="num">${fmt(e.amount)}</td>
-      <td><button class="x" data-act="delExp" title="Xoá">✕</button></td>
+      <td class="acts"><button class="x" data-act="editExp" title="Sửa">✎</button><button class="x" data-act="delExp" title="Xoá">✕</button></td>
     </tr>`).join('') +
     (state.expenses.length ? `<tr><td class="total" colspan="3">Tổng cộng</td><td class="num total">${fmt(total)}</td><td></td></tr>`
       : '<tr><td colspan="5" class="empty">Chưa có khoản chi</td></tr>');
@@ -656,8 +670,9 @@ document.addEventListener('click', e => {
 const tabForBill = () => { if (!state.members.length && !state.online) setTab('members'); };
 
 // ---------- Sự kiện ----------
-$('billSelect').addEventListener('change', e => { selectBill(e.target.value); commit(); tabForBill(); });
+$('billSelect').addEventListener('change', e => { endEdit(); selectBill(e.target.value); commit(); tabForBill(); });
 $('btnNew').addEventListener('click', () => {
+  endEdit();
   const b = newBill();
   store.bills.unshift(b);
   selectBill(b.id);
@@ -672,6 +687,7 @@ $('btnDelete').addEventListener('click', () => {
     ? `Xoá bill “${name}” khỏi máy này? Bill vẫn còn trên mạng, mở lại link là thấy.`
     : `Xoá bill “${name}”? Không khôi phục được.`)) return;
   try { localStorage.removeItem(LIVE_KEY + state.id); } catch (e) {}
+  endEdit();
   store.bills = store.bills.filter(b => b.id !== state.id);
   if (!store.bills.length) store.bills.push(newBill());
   selectBill(store.bills[0].id);
@@ -679,6 +695,7 @@ $('btnDelete').addEventListener('click', () => {
 });
 $('billName').addEventListener('input', e => { state.name = e.target.value; save(); renderBills(); });
 $('billName').addEventListener('change', commit);
+$('billDate').addEventListener('change', e => { state.date = e.target.value || isoDate(Date.now()); commit(); });
 
 $('memberForm').addEventListener('submit', e => {
   e.preventDefault();
@@ -741,20 +758,66 @@ $('expForm').addEventListener('submit', e => {
   if (!payer) return toast('Chọn người trả');
   if (!split.length) return toast('Chọn ít nhất 1 người để chia');
 
-  const exp = { id: uid(), desc: $('expDesc').value.trim(), amount, payer, mode, split };
-  if (weights) exp.weights = weights;
-  state.expenses.push(exp);
-  $('expDesc').value = ''; $('expAmount').value = '';
-  if (mode === 'exact') inputs.forEach(i => i.value = '');
+  const data = { desc: $('expDesc').value.trim(), amount, payer, mode, split };
+  if (weights) data.weights = weights;
+  const old = editingId && state.expenses.find(x => x.id === editingId);
+  if (old) {
+    delete old.weights;
+    Object.assign(old, data);   // giữ id và thứ tự
+    toast('Đã lưu khoản chi');
+  } else state.expenses.push({ id: uid(), ...data });
+  if (editingId) endEdit(); else clearExpForm(false);
   $('expDesc').focus();
   commit();
 });
 $('expenses').addEventListener('click', e => {
-  if (e.target.dataset.act !== 'delExp') return;
+  const act = e.target.dataset.act;
+  if (!act) return;
   const id = e.target.closest('tr').dataset.id;
+  if (act === 'editExp') return startEdit(id);
+  if (act !== 'delExp') return;
+  if (id === editingId) endEdit();
   state.expenses = state.expenses.filter(x => x.id !== id);
   commit();
 });
+$('expCancel').addEventListener('click', () => { endEdit(); render(); });
+
+// ---------- Sửa khoản chi ----------
+let editingId = null;
+function clearExpForm(resetSplit) {
+  $('expDesc').value = ''; $('expAmount').value = '';
+  // vẽ lại ô chia với giá trị mặc định ở lần render sau
+  if (resetSplit || $('expMode').value === 'exact') $('expSplit').dataset.mode = '';
+}
+function startEdit(id) {
+  const e = state.expenses.find(x => x.id === id);
+  if (!e) return;
+  editingId = id;
+  $('expDesc').value = e.desc;
+  $('expAmount').value = e.amount;
+  $('expPayer').value = e.payer;
+  $('expMode').value = e.mode;
+  $('expSplit').dataset.mode = '';
+  renderSplit();
+  $('expSplit').querySelectorAll('[data-m]').forEach(i => {
+    const m = i.dataset.m;
+    if (e.mode === 'equal') i.checked = e.split.includes(m);
+    else i.value = e.weights?.[m] ?? (e.mode === 'shares' ? 0 : '');
+  });
+  $('expSubmit').textContent = 'Lưu';
+  $('expCancel').hidden = false;
+  render();
+  updateHint();
+  $('expForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  $('expDesc').focus();
+}
+function endEdit() {
+  if (!editingId) return;
+  editingId = null;
+  $('expSubmit').textContent = 'Thêm';
+  $('expCancel').hidden = true;
+  clearExpForm(true);
+}
 $('btnAll').addEventListener('click', () => {
   const boxes = [...document.querySelectorAll('#expSplit input[type=checkbox]')];
   const all = boxes.every(b => b.checked);
