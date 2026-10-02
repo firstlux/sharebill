@@ -215,7 +215,7 @@
     <h2>1. Khoản chi</h2>
     <form class="row exp-form" id="expForm">
       <input id="expDesc" class="grow" placeholder="Nội dung, vd: Ăn tối" autocomplete="off">
-      <input id="expAmount" inputmode="numeric" placeholder="Số tiền" style="width:140px" autocomplete="off">
+      <input id="expAmount" inputmode="numeric" placeholder="Số tiền, vd 250k" style="width:150px" autocomplete="off">
       <select id="expPayer" title="Người trả"></select>
       <button id="expSubmit">Thêm</button>
       <button type="button" class="ghost" id="expCancel" hidden>Huỷ</button>
@@ -273,19 +273,53 @@ const BANKS = [
 const bankName = bin => (BANKS.find(b => b[0] === bin) || [, ''])[1];
 
 const $ = id => document.getElementById(id);
-const fmt = n => Math.round(n).toLocaleString('vi-VN') + 'đ';
+// Dấu phẩy ngăn cách hàng nghìn: 1,250,000đ
+const fmt = n => Math.round(n).toLocaleString('en-US') + 'đ';
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = () => Math.random().toString(36).slice(2, 9);
 const parseAmount = s => {
-  // hỗ trợ "150k", "1.2tr", "150.000"
+  // hỗ trợ "150k", "1.2tr", "1,5tr", "150,000", "150.000"
   s = String(s).trim().toLowerCase().replace(/\s/g, '');
   let mul = 1;
   if (/k$/.test(s)) { mul = 1e3; s = s.slice(0, -1); }
   else if (/(tr|m)$/.test(s)) { mul = 1e6; s = s.replace(/(tr|m)$/, ''); }
-  s = mul > 1 ? s.replace(',', '.') : s.replace(/[.,]/g, '');
+  if (mul === 1) s = s.replace(/[.,]/g, '');
+  else if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) s = s.replace(/,/g, '');   // 1,250k
+  else s = s.replace(',', '.');                                              // 1,5tr = 1.5tr
   const n = parseFloat(s) * mul;
   return isFinite(n) && n > 0 ? Math.round(n) : 0;
 };
+const fmtNum = n => n ? n.toLocaleString('en-US') : '';
+
+// Ô nhập số tiền: tự thêm dấu phẩy hàng nghìn khi gõ; rời ô thì đổi 250k / 1.2tr thành số đầy đủ
+function formatAmountInput(el, ev) {
+  const v = el.value, prev = el._prev || '';
+  el._prev = v;
+  if (!/^[\d,\s]*$/.test(v)) return;   // có chữ (k, tr) hoặc dấu chấm thập phân (1.2tr): để nguyên tới khi rời ô
+  let before = v.slice(0, el.selectionStart).replace(/\D/g, '').length;
+  let digits = v.replace(/\D/g, '');
+  // Xoá đúng dấu phẩy thì xoá luôn chữ số đứng trước nó
+  if (ev.inputType === 'deleteContentBackward' && digits === prev.replace(/\D/g, '') && before > 0) {
+    digits = digits.slice(0, before - 1) + digits.slice(before);
+    before--;
+  }
+  digits = digits.replace(/^0+(?=\d)/, '');
+  const out = digits ? Number(digits).toLocaleString('en-US') : '';
+  el._prev = out;
+  if (out === v) return;
+  el.value = out;
+  let pos = 0;
+  for (let seen = 0; pos < out.length && seen < before; pos++) if (/\d/.test(out[pos])) seen++;
+  el.setSelectionRange(pos, pos);
+}
+const isAmountInput = el => el.id === 'expAmount' || (el.dataset?.m && el.type !== 'checkbox' && $('expMode').value === 'exact');
+document.addEventListener('input', e => { if (isAmountInput(e.target)) formatAmountInput(e.target, e); });
+document.addEventListener('focusout', e => {
+  if (!isAmountInput(e.target)) return;
+  const n = parseAmount(e.target.value);
+  if (n) e.target.value = e.target._prev = fmtNum(n);
+  updateHint();
+});
 const parseShare = s => { const n = parseFloat(String(s).replace(',', '.')); return isFinite(n) && n > 0 ? n : 0; };
 
 // ---------- State ----------
@@ -1088,6 +1122,7 @@ function renderPeople() {
       <div class="row top-line">
         <span class="name">${esc(m.name)}</span>
         ${bg && !showHeads ? `<span class="tag">👥 ${esc(bg.name)}</span>` : ''}
+        <button class="x" data-act="renameMember" title="Đổi tên">✎</button>
         ${personOf(m) ? '' : '<button class="x" data-act="saveDir" title="Lưu người này vào danh bạ của bạn">📇 Lưu danh bạ</button>'}
         <button class="x" data-act="delMember" title="Bỏ khỏi bill">✕</button>
       </div>${bankRow(m)}
@@ -1191,6 +1226,15 @@ $('addFromDir').addEventListener('click', e => {
 
 $('members').addEventListener('click', e => {
   const act = e.target.dataset.act;
+  if (act === 'renameMember') {
+    const m = state.members.find(x => x.id === e.target.closest('.member').dataset.id);
+    const name = (prompt('Tên mới:', m.name) || '').trim();
+    if (!name || name === m.name) return;
+    m.name = name;
+    const p = personOf(m);
+    if (p) { p.name = name; propagatePerson(p); }   // đổi luôn trong danh bạ và các bill khác
+    return commit();
+  }
   if (act === 'saveDir') {
     // Thành viên từ bill người khác chia sẻ: lưu vào danh bạ của mình
     const m = state.members.find(x => x.id === e.target.closest('.member').dataset.id);
@@ -1333,7 +1377,7 @@ function startEdit(id) {
   if (!e) return;
   editingId = id;
   $('expDesc').value = e.desc;
-  $('expAmount').value = e.amount;
+  $('expAmount').value = fmtNum(e.amount);
   $('expPayer').value = e.payer;
   $('expMode').value = e.mode;
   $('expSplit').dataset.mode = '';
@@ -1341,7 +1385,8 @@ function startEdit(id) {
   $('expSplit').querySelectorAll('[data-m]').forEach(i => {
     const m = i.dataset.m;
     if (e.mode === 'equal') i.checked = e.split.includes(m);
-    else i.value = e.weights?.[m] ?? (e.mode === 'shares' ? 0 : '');
+    else if (e.mode === 'shares') i.value = e.weights?.[m] ?? 0;
+    else i.value = fmtNum(e.weights?.[m]);
   });
   $('expSubmit').textContent = 'Lưu';
   $('expCancel').hidden = false;
