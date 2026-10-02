@@ -336,14 +336,7 @@ function load() {
     store.current = id;
     history.replaceState(null, '', location.pathname);
   } else if (location.hash.length > 1) {
-    try {
-      const json = decodeURIComponent(escape(atob(location.hash.slice(1).replace(/-/g,'+').replace(/_/g,'/'))));
-      const b = normalize(JSON.parse(json));
-      const i = store.bills.findIndex(x => x.id === b.id);
-      if (i >= 0) store.bills[i] = b; else store.bills.unshift(b);
-      store.current = b.id;
-      toast(i >= 0 ? 'Đã cập nhật bill từ link' : 'Đã mở bill từ link');
-    } catch (e) { console.warn(e); toast('Link bill không hợp lệ'); }
+    importSnapshot(location.hash.slice(1));
     history.replaceState(null, '', location.pathname);
   }
   if (!store.bills.length) store.bills.push(newBill());
@@ -351,6 +344,46 @@ function load() {
   save();
 }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {} }
+
+// Link bản chụp (bill chưa bật sửa chung): toàn bộ bill nén trong phần sau dấu #
+function importSnapshot(hash) {
+  try {
+    const json = decodeURIComponent(escape(atob(hash.replace(/-/g,'+').replace(/_/g,'/'))));
+    const b = normalize(JSON.parse(json));
+    const i = store.bills.findIndex(x => x.id === b.id);
+    if (i >= 0) store.bills[i] = b; else store.bills.unshift(b);
+    store.current = b.id;
+    toast(i >= 0 ? 'Đã cập nhật bill từ link' : 'Đã mở bill từ link');
+    return true;
+  } catch (e) { console.warn(e); toast('Link bill không hợp lệ'); return false; }
+}
+
+// Mở link dán tay. App cài trên màn hình chính iPhone có bộ nhớ riêng, link bấm từ
+// Zalo / camera luôn mở trong Safari, nên cần chỗ dán link ngay trong app.
+function openLink(text) {
+  text = String(text || '').trim();
+  if (!text) return;
+  let m;
+  if ((m = text.match(/#b=([\w-]{16,})/))) {
+    const id = m[1];
+    if (!store.bills.some(b => b.id === id)) store.bills.unshift({ ...newBill(), id, name: 'Đang tải…', online: true });
+    endEdit(); selectBill(id); commit(); setTab('bill');
+    return;
+  }
+  if ((m = text.match(/#d=([\w-]{16,})/))) return joinDir(m[1]);
+  const h = text.indexOf('#');
+  if (h >= 0 && importSnapshot(text.slice(h + 1))) { endEdit(); selectBill(store.current); commit(); setTab('bill'); return; }
+  if (h < 0) toast('Link không hợp lệ');
+}
+function joinDir(id) {
+  if (store.dirId === id) return toast('Máy này đã dùng danh bạ này');
+  dirLive.unsub.forEach(f => f());
+  store.dirId = id;
+  dirLive.join = true;
+  save();
+  connectDir();
+  setTab('dir');
+}
 
 // ---------- Danh bạ: người + nhóm dùng chung cho mọi bill (lưu trên máy) ----------
 // Thành viên trong bill là bản sao của người trong danh bạ, liên kết qua pid (mặc định = id).
@@ -668,7 +701,11 @@ function renderDirSync() {
   if (box.hidden) return;
   if (!store.dirId) {
     box.innerHTML = `<div class="row"><span class="grow muted">Danh bạ đang chỉ lưu trên máy này.</span>
-      <button class="ghost" data-act="dirOn">☁️ Đồng bộ các thiết bị</button></div>`;
+      <button class="ghost" data-act="dirOn">☁️ Đồng bộ các thiết bị</button></div>
+      <form class="row" id="dirJoinForm" style="margin-top:8px">
+        <input id="dirJoinInput" class="grow" placeholder="Đã đồng bộ ở máy khác? Dán link kết nối vào đây" autocomplete="off">
+        <button class="ghost">Kết nối</button>
+      </form>`;
     return;
   }
   const st = dirLive.error ? `<span class="live-status off"><b>●</b> ${esc(dirLive.error)}</span>`
@@ -688,6 +725,13 @@ function renderDirSync() {
         </div>
       </div>`);
 }
+$('dirSync').addEventListener('submit', e => {
+  e.preventDefault();
+  const text = $('dirJoinInput').value.trim();
+  if (/^[\w-]{16,}$/.test(text)) joinDir(text);         // chỉ dán mã
+  else if (/#d=/.test(text)) openLink(text);
+  else toast('Đây không phải link kết nối danh bạ (link có dạng …#d=…)');
+});
 $('dirSync').addEventListener('click', async e => {
   const act = e.target.dataset.act;
   if (act === 'dirOn') enableDirSync();
@@ -850,7 +894,8 @@ const billLabel = b => `${b.name || 'Bill chưa đặt tên'} · ${viDate(b.date
 
 function renderBills() {
   $('billSelect').innerHTML = store.bills.map(b =>
-    `<option value="${b.id}" ${b.id === state.id ? 'selected' : ''}>${esc(billLabel(b))}</option>`).join('');
+    `<option value="${b.id}" ${b.id === state.id ? 'selected' : ''}>${esc(billLabel(b))}</option>`).join('') +
+    '<option value="__paste">📥 Mở bill từ link…</option>';
   $('billCount').hidden = store.bills.length < 2;
   $('billCount').textContent = store.bills.length;
 }
@@ -1091,7 +1136,13 @@ document.addEventListener('click', e => {
 const tabForBill = () => { if (!state.members.length && !state.online) setTab('members'); };
 
 // ---------- Sự kiện ----------
-$('billSelect').addEventListener('change', e => { endEdit(); selectBill(e.target.value); commit(); tabForBill(); });
+$('billSelect').addEventListener('change', e => {
+  if (e.target.value === '__paste') {
+    e.target.value = state.id;
+    return openLink(prompt('Dán link bill được chia sẻ (hoặc link kết nối danh bạ):'));
+  }
+  endEdit(); selectBill(e.target.value); commit(); tabForBill();
+});
 $('btnNew').addEventListener('click', () => {
   endEdit();
   const b = newBill();
