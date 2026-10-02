@@ -28,12 +28,14 @@
   body { margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .wrap { max-width: 880px; margin: 0 auto; padding: 20px 16px 60px; }
-  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  header { margin-bottom: 16px; }
   header h1 { margin: 0; font-size: 22px; }
-  header input { flex: 1; min-width: 180px; font-size: 16px; font-weight: 600; }
+  header .row + .row { margin-top: 8px; }
+  #billName { font-size: 16px; font-weight: 600; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
     padding: 16px; margin-bottom: 16px; }
-  .card h2 { margin: 0 0 12px; font-size: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .card h2 small { font-weight: 500; color: var(--muted); font-size: 13px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   input, select { font: inherit; color: var(--text); background: var(--bg);
     border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
@@ -60,13 +62,23 @@
   .chips label { background: var(--chip); border: 1px solid var(--line); border-radius: 999px;
     padding: 4px 10px; cursor: pointer; user-select: none; font-size: 14px; }
   .chips input { margin: 0 4px 0 0; vertical-align: -2px; }
+  .sp { display: flex; align-items: center; gap: 8px; padding: 3px 0; max-width: 360px; }
+  .sp span { flex: 1; }
+  .sp input { width: 130px; text-align: right; }
+  .split-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 6px; }
   .transfers { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
   .tf { border: 1px solid var(--line); border-radius: 12px; padding: 12px; text-align: center; }
   .tf .who { font-weight: 600; }
   .tf .amt { font-size: 20px; font-weight: 700; color: var(--primary); margin: 4px 0; }
   .tf .qr { background: #fff; border-radius: 8px; padding: 8px; display: inline-block; margin-top: 8px; }
-  .tf .qr svg, .tf .qr img { display: block; width: 200px; height: 200px; }
+  .tf .qr svg { display: block; width: 200px; height: 200px; }
   .tf .bank { font-size: 13px; color: var(--muted); margin-top: 6px; word-break: break-word; }
+  .tf button { margin-top: 10px; width: 100%; }
+  .paid-list { margin-top: 14px; }
+  .paid { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px dashed var(--line); }
+  .paid .who { flex: 1; color: var(--muted); }
+  .paid .who b { color: var(--pos); }
+  .done-all { text-align: center; padding: 12px; font-weight: 600; color: var(--pos); }
   .empty { color: var(--muted); text-align: center; padding: 12px; }
   .total { font-weight: 700; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
@@ -82,16 +94,22 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>🧾 ShareBill</h1>
-    <input id="billName" placeholder="Tên bill, vd: Đi Đà Lạt 09/2026">
-    <button class="ghost" id="btnShare" title="Copy link chứa toàn bộ dữ liệu bill">🔗 Copy link</button>
-    <button class="ghost" id="btnReset">Xoá hết</button>
+    <div class="row">
+      <h1>🧾 ShareBill</h1>
+      <select id="billSelect" class="grow" title="Chọn bill"></select>
+      <button class="ghost" id="btnNew">+ Bill mới</button>
+    </div>
+    <div class="row">
+      <input id="billName" class="grow" placeholder="Tên bill, vd: Đi Đà Lạt 09/2026">
+      <button class="ghost" id="btnShare" title="Copy link chứa toàn bộ dữ liệu bill">🔗 Copy link</button>
+      <button class="ghost" id="btnDelete">Xoá bill</button>
+    </div>
   </header>
 
   <section class="card">
     <h2>1. Thành viên</h2>
     <form class="row" id="memberForm">
-      <input id="memberName" class="grow" placeholder="Tên thành viên" autocomplete="off">
+      <input id="memberName" class="grow" placeholder="Tên thành viên (nhiều tên cách nhau dấu phẩy)" autocomplete="off">
       <button>Thêm</button>
     </form>
     <p class="muted">Nhập ngân hàng + số tài khoản để người khác quét QR chuyển tiền cho bạn.</p>
@@ -106,11 +124,15 @@
       <select id="expPayer" title="Người trả"></select>
       <button>Thêm</button>
     </form>
-    <div style="margin-top:10px">
-      <span class="muted">Chia cho:</span>
-      <button type="button" class="x" id="btnAll">chọn tất cả</button>
-      <div class="chips" id="expSplit" style="margin-top:6px"></div>
+    <div class="split-head">
+      <select id="expMode" title="Cách chia">
+        <option value="equal">Chia đều</option>
+        <option value="shares">Chia theo suất</option>
+        <option value="exact">Chia theo số tiền</option>
+      </select>
+      <button type="button" class="x" id="btnAll">chọn / bỏ tất cả</button>
     </div>
+    <div id="expSplit"></div>
     <div style="margin-top:12px; overflow-x:auto">
       <table>
         <thead><tr><th>Nội dung</th><th>Người trả</th><th class="hide-sm">Chia cho</th><th class="num">Số tiền</th><th></th></tr></thead>
@@ -123,16 +145,17 @@
     <h2>3. Tổng kết</h2>
     <div style="overflow-x:auto">
       <table>
-        <thead><tr><th>Thành viên</th><th class="num">Đã trả</th><th class="num">Phần phải chịu</th><th class="num">Chênh lệch</th></tr></thead>
+        <thead><tr><th>Thành viên</th><th class="num">Đã chi</th><th class="num">Phần phải chịu</th><th class="num">Chênh lệch</th></tr></thead>
         <tbody id="summary"></tbody>
       </table>
     </div>
   </section>
 
   <section class="card">
-    <h2>4. Chuyển khoản &amp; mã QR</h2>
-    <p class="muted" style="margin-top:-6px">Số lần chuyển đã được tối giản. Quét QR bằng app ngân hàng bất kỳ (chuẩn VietQR/Napas).</p>
+    <h2>4. Chuyển khoản &amp; mã QR <small id="progress"></small></h2>
+    <p class="muted" style="margin-top:-6px">Số lần chuyển đã được tối giản. Quét QR bằng app ngân hàng bất kỳ (chuẩn VietQR/Napas). Chuyển xong thì bấm “Đã trả”.</p>
     <div class="transfers" id="transfers"></div>
+    <div class="paid-list" id="paidList"></div>
   </section>
 </div>
 <div class="toast" id="toast"></div>
@@ -166,43 +189,94 @@ const parseAmount = s => {
   const n = parseFloat(s) * mul;
   return isFinite(n) && n > 0 ? Math.round(n) : 0;
 };
+const parseShare = s => { const n = parseFloat(String(s).replace(',', '.')); return isFinite(n) && n > 0 ? n : 0; };
 
 // ---------- State ----------
-const KEY = 'sharebill-v1';
-let state = { name: '', members: [], expenses: [] };
+// store: nhiều bill; state: bill đang mở
+const KEY = 'sharebill-v2', OLD_KEY = 'sharebill-v1';
+let store = { current: null, bills: [] };
+let state;
+
+const newBill = () => ({ id: uid(), name: '', created: Date.now(), members: [], expenses: [], payments: [] });
+function normalize(b) {
+  // bổ sung field còn thiếu cho dữ liệu cũ (v1, link cũ)
+  b.id ||= uid(); b.created ||= Date.now(); b.name ||= '';
+  b.members ||= []; b.expenses ||= []; b.payments ||= [];
+  b.expenses.forEach(e => { e.mode ||= 'equal'; e.split ||= []; });
+  return b;
+}
+function selectBill(id) {
+  state = store.bills.find(b => b.id === id) || store.bills[0];
+  store.current = state.id;
+}
 
 function load() {
+  try {
+    const s = localStorage.getItem(KEY);
+    if (s) store = JSON.parse(s);
+    else { const old = localStorage.getItem(OLD_KEY); if (old) store.bills = [JSON.parse(old)]; }
+  } catch (e) {}
+  store.bills = (store.bills || []).map(normalize);
+
   if (location.hash.length > 1) {
     try {
       const json = decodeURIComponent(escape(atob(location.hash.slice(1).replace(/-/g,'+').replace(/_/g,'/'))));
-      state = JSON.parse(json);
-      history.replaceState(null, '', location.pathname);
-      save();
-      toast('Đã mở bill từ link');
-      return;
-    } catch (e) { console.warn(e); }
+      const b = normalize(JSON.parse(json));
+      const i = store.bills.findIndex(x => x.id === b.id);
+      if (i >= 0) store.bills[i] = b; else store.bills.unshift(b);
+      store.current = b.id;
+      toast(i >= 0 ? 'Đã cập nhật bill từ link' : 'Đã mở bill từ link');
+    } catch (e) { console.warn(e); toast('Link bill không hợp lệ'); }
+    history.replaceState(null, '', location.pathname);
   }
-  try { const s = localStorage.getItem(KEY); if (s) state = JSON.parse(s); } catch (e) {}
+  if (!store.bills.length) store.bills.push(newBill());
+  selectBill(store.current);
+  save();
 }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {} }
 function commit() { save(); render(); }
 
 // ---------- Tính toán ----------
+// Phần phải chịu của từng người trong 1 khoản chi: {memberId: số tiền}
+function shareOf(e, ids) {
+  const w = {};
+  if (e.mode === 'equal') e.split.forEach(id => { if (ids.has(id)) w[id] = 1; });
+  else for (const [id, v] of Object.entries(e.weights || {})) if (ids.has(id) && v > 0) w[id] = v;
+  const keys = Object.keys(w);
+  if (!keys.length) return null;
+  const W = keys.reduce((s, k) => s + w[k], 0);
+  if (e.mode === 'exact' && W === e.amount) return w;
+  // Chia theo tỷ lệ; tiền lẻ còn dư cộng cho người có phần thập phân lớn nhất
+  const out = {}; let used = 0;
+  const frac = keys.map(k => {
+    const x = e.amount * w[k] / W;
+    out[k] = Math.floor(x); used += out[k];
+    return [k, x - out[k]];
+  }).sort((a, b) => b[1] - a[1]);
+  for (let i = 0; used < e.amount; i++, used++) out[frac[i % frac.length][0]]++;
+  return out;
+}
+
 function compute() {
-  const paid = {}, owe = {};
-  state.members.forEach(m => { paid[m.id] = 0; owe[m.id] = 0; });
+  const ids = new Set(state.members.map(m => m.id));
+  const paid = {}, owe = {}, net = {};
+  ids.forEach(id => { paid[id] = 0; owe[id] = 0; });
   for (const e of state.expenses) {
-    const parts = e.split.filter(id => id in owe);
-    if (!parts.length || !(e.payer in paid)) continue;
+    if (!ids.has(e.payer)) continue;
+    const sh = shareOf(e, ids);
+    if (!sh) continue;
     paid[e.payer] += e.amount;
-    const base = Math.floor(e.amount / parts.length);
-    let rem = e.amount - base * parts.length;
-    parts.forEach(id => { owe[id] += base + (rem-- > 0 ? 1 : 0); });
+    for (const k in sh) owe[k] += sh[k];
   }
-  const bal = state.members.map(m => ({ id: m.id, v: paid[m.id] - owe[m.id] }));
+  ids.forEach(id => net[id] = paid[id] - owe[id]);
+  // Các khoản đã chuyển trả làm giảm số còn nợ / còn được nhận
+  const payments = state.payments.filter(p => ids.has(p.from) && ids.has(p.to));
+  payments.forEach(p => { net[p.from] += p.amount; net[p.to] -= p.amount; });
+
   // Tối giản: ghép người nợ nhiều nhất với người được nhận nhiều nhất
-  const cred = bal.filter(b => b.v > 0).map(b => ({...b})).sort((a, b) => b.v - a.v);
-  const debt = bal.filter(b => b.v < 0).map(b => ({...b, v: -b.v})).sort((a, b) => b.v - a.v);
+  const bal = state.members.map(m => ({ id: m.id, v: net[m.id] }));
+  const cred = bal.filter(b => b.v > 0).sort((a, b) => b.v - a.v);
+  const debt = bal.filter(b => b.v < 0).map(b => ({ ...b, v: -b.v })).sort((a, b) => b.v - a.v);
   const transfers = [];
   let i = 0, j = 0;
   while (i < debt.length && j < cred.length) {
@@ -212,7 +286,7 @@ function compute() {
     if (debt[i].v === 0) i++;
     if (cred[j].v === 0) j++;
   }
-  return { paid, owe, transfers };
+  return { paid, owe, transfers, payments };
 }
 
 // ---------- VietQR (EMVCo) ----------
@@ -244,9 +318,64 @@ function qrSvg(text) {
 
 // ---------- Render ----------
 const nameOf = id => (state.members.find(m => m.id === id) || {}).name || '?';
+const billLabel = b => `${b.name || 'Bill chưa đặt tên'} · ${new Date(b.created).toLocaleDateString('vi-VN')}`;
+
+function renderBills() {
+  $('billSelect').innerHTML = store.bills.map(b =>
+    `<option value="${b.id}" ${b.id === state.id ? 'selected' : ''}>${esc(billLabel(b))}</option>`).join('');
+}
+
+// Ô chia tiền theo cách chia đang chọn; giữ lại giá trị đã nhập khi render lại
+function renderSplit() {
+  const box = $('expSplit'), mode = $('expMode').value;
+  const prev = {};
+  if (box.dataset.mode === mode && box.dataset.bill === state.id)
+    box.querySelectorAll('[data-m]').forEach(i => prev[i.dataset.m] = i.type === 'checkbox' ? i.checked : i.value);
+  box.dataset.mode = mode;
+  box.dataset.bill = state.id;
+  $('btnAll').style.display = mode === 'equal' ? '' : 'none';
+
+  if (!state.members.length) { box.innerHTML = '<span class="muted">Thêm thành viên trước</span>'; return; }
+  if (mode === 'equal') {
+    box.innerHTML = '<div class="chips">' + state.members.map(m =>
+      `<label><input type="checkbox" data-m="${m.id}" ${prev[m.id] === false ? '' : 'checked'}>${esc(m.name)}</label>`
+    ).join('') + '</div>';
+    return;
+  }
+  const shares = mode === 'shares';
+  box.innerHTML = state.members.map(m => `
+    <div class="sp"><span>${esc(m.name)}</span>
+      <input data-m="${m.id}" inputmode="${shares ? 'decimal' : 'numeric'}" autocomplete="off"
+        placeholder="${shares ? '0' : 'vd: 150k'}" value="${esc(prev[m.id] ?? (shares ? '1' : ''))}">
+    </div>`).join('') +
+    `<div class="muted" id="splitHint" style="margin-top:6px">${shares
+      ? 'Mỗi người chịu theo số suất, 0 = không tham gia. Vd: người lớn 2, trẻ em 1.' : ''}</div>`;
+  updateHint();
+}
+function updateHint() {
+  if ($('expMode').value !== 'exact' || !$('splitHint')) return;
+  const sum = [...$('expSplit').querySelectorAll('[data-m]')].reduce((s, i) => s + parseAmount(i.value), 0);
+  const amount = parseAmount($('expAmount').value);
+  const hint = $('splitHint');
+  hint.className = 'muted';
+  if (!amount) hint.textContent = `Tổng đã chia: ${fmt(sum)} (để trống “Số tiền” sẽ lấy tổng này)`;
+  else if (sum === amount) { hint.textContent = `✓ Đã chia đủ ${fmt(amount)}`; hint.className = 'pos'; }
+  else {
+    hint.textContent = sum < amount ? `Còn thiếu ${fmt(amount - sum)} chưa chia` : `Chia dư ${fmt(sum - amount)}`;
+    hint.className = 'neg';
+  }
+}
+
+function splitText(e) {
+  const n = id => esc(nameOf(id));
+  if (e.mode === 'shares') return e.split.map(id => `${n(id)} ×${e.weights[id]}`).join(', ');
+  if (e.mode === 'exact') return e.split.map(id => `${n(id)} ${fmt(e.weights[id])}`).join(', ');
+  return e.split.length === state.members.length ? 'Tất cả' : e.split.map(n).join(', ');
+}
 
 function render() {
-  $('billName').value = state.name || '';
+  renderBills();
+  if (document.activeElement !== $('billName')) $('billName').value = state.name;
 
   // Thành viên
   const bankOpts = '<option value="">— Ngân hàng —</option>' + BANKS.map(b => `<option value="${b[0]}">${b[1]}</option>`).join('');
@@ -271,11 +400,7 @@ function render() {
   $('expPayer').innerHTML = '<option value="">Người trả…</option>' +
     state.members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
   $('expPayer').value = state.members.some(m => m.id === prevPayer) ? prevPayer : '';
-  // Giữ trạng thái tick cũ; thành viên mới mặc định được tick
-  const unchecked = new Set([...document.querySelectorAll('#expSplit input:not(:checked)')].map(i => i.value));
-  $('expSplit').innerHTML = state.members.map(m =>
-    `<label><input type="checkbox" value="${m.id}" ${unchecked.has(m.id) ? '' : 'checked'}>${esc(m.name)}</label>`
-  ).join('') || '<span class="muted">Thêm thành viên trước</span>';
+  renderSplit();
 
   // Danh sách khoản chi
   const total = state.expenses.reduce((s, e) => s + e.amount, 0);
@@ -283,7 +408,7 @@ function render() {
     <tr data-id="${e.id}">
       <td>${esc(e.desc || '(không tên)')}</td>
       <td>${esc(nameOf(e.payer))}</td>
-      <td class="hide-sm muted">${e.split.length === state.members.length ? 'Tất cả' : e.split.map(id => esc(nameOf(id))).join(', ')}</td>
+      <td class="hide-sm muted">${splitText(e)}</td>
       <td class="num">${fmt(e.amount)}</td>
       <td><button class="x" data-act="delExp" title="Xoá">✕</button></td>
     </tr>`).join('') +
@@ -291,7 +416,7 @@ function render() {
       : '<tr><td colspan="5" class="empty">Chưa có khoản chi</td></tr>');
 
   // Tổng kết
-  const { paid, owe, transfers } = compute();
+  const { paid, owe, transfers, payments } = compute();
   $('summary').innerHTML = state.members.map(m => {
     const d = paid[m.id] - owe[m.id];
     return `<tr><td>${esc(m.name)}</td><td class="num">${fmt(paid[m.id])}</td><td class="num">${fmt(owe[m.id])}</td>
@@ -300,6 +425,8 @@ function render() {
 
   // Chuyển khoản + QR
   const billName = state.name || 'ShareBill';
+  const all = transfers.length + payments.length;
+  $('progress').textContent = all ? `Đã trả ${payments.length}/${all} lượt` : '';
   $('transfers').innerHTML = transfers.map(t => {
     const to = state.members.find(m => m.id === t.to);
     const from = state.members.find(m => m.id === t.from);
@@ -308,12 +435,35 @@ function render() {
     const qr = hasBank ? `<div class="qr">${qrSvg(vietQR(to.bank, to.account.replace(/\s/g, ''), t.amount, info))}</div>
       <div class="bank">${esc(bankName(to.bank))} · ${esc(to.account)}<br>ND: ${esc(noAccent(info))}</div>`
       : `<div class="bank" style="margin-top:12px">⚠️ ${esc(to.name)} chưa nhập ngân hàng / số tài khoản</div>`;
-    return `<div class="tf"><div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(t.amount)}</div>${qr}</div>`;
-  }).join('') || '<div class="empty">Không có khoản nào cần chuyển</div>';
+    return `<div class="tf"><div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(t.amount)}</div>${qr}
+      <button data-act="pay" data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}">✓ Đã trả</button></div>`;
+  }).join('') || (payments.length ? '<div class="done-all">🎉 Đã thanh toán xong!</div>'
+                                  : '<div class="empty">Không có khoản nào cần chuyển</div>');
+  $('paidList').innerHTML = payments.map(p => `
+    <div class="paid">
+      <span class="who"><b>✓</b> ${esc(nameOf(p.from))} → ${esc(nameOf(p.to))} · ${fmt(p.amount)}
+        <span class="muted">· ${new Date(p.at).toLocaleDateString('vi-VN')}</span></span>
+      <button class="x" data-act="undo" data-id="${p.id}">Hoàn tác</button>
+    </div>`).join('');
 }
 
 // ---------- Sự kiện ----------
-$('billName').addEventListener('input', e => { state.name = e.target.value; save(); });
+$('billSelect').addEventListener('change', e => { selectBill(e.target.value); commit(); });
+$('btnNew').addEventListener('click', () => {
+  const b = newBill();
+  store.bills.unshift(b);
+  selectBill(b.id);
+  commit();
+  $('billName').focus();
+});
+$('btnDelete').addEventListener('click', () => {
+  if (!confirm(`Xoá bill “${state.name || 'Bill chưa đặt tên'}”? Không khôi phục được.`)) return;
+  store.bills = store.bills.filter(b => b.id !== state.id);
+  if (!store.bills.length) store.bills.push(newBill());
+  selectBill(store.bills[0].id);
+  commit();
+});
+$('billName').addEventListener('input', e => { state.name = e.target.value; save(); renderBills(); });
 $('billName').addEventListener('change', render);
 
 $('memberForm').addEventListener('submit', e => {
@@ -328,11 +478,16 @@ $('memberForm').addEventListener('submit', e => {
 $('members').addEventListener('click', e => {
   if (e.target.dataset.act !== 'delMember') return;
   const id = e.target.closest('.member').dataset.id;
-  if (state.expenses.some(x => x.payer === id || x.split.includes(id)) &&
-      !confirm('Thành viên này có trong khoản chi. Xoá sẽ bỏ họ khỏi các khoản đó. Tiếp tục?')) return;
+  const used = state.expenses.some(x => x.payer === id || x.split.includes(id)) ||
+               state.payments.some(p => p.from === id || p.to === id);
+  if (used && !confirm('Thành viên này có trong khoản chi / thanh toán. Xoá sẽ bỏ họ khỏi các khoản đó. Tiếp tục?')) return;
   state.members = state.members.filter(m => m.id !== id);
-  state.expenses = state.expenses.filter(x => x.payer !== id)
-    .map(x => ({ ...x, split: x.split.filter(s => s !== id) })).filter(x => x.split.length);
+  state.payments = state.payments.filter(p => p.from !== id && p.to !== id);
+  state.expenses = state.expenses.filter(x => x.payer !== id).map(x => {
+    x.split = x.split.filter(s => s !== id);
+    if (x.weights) delete x.weights[id];
+    return x;
+  }).filter(x => x.split.length);
   commit();
 });
 $('members').addEventListener('change', e => {
@@ -342,16 +497,41 @@ $('members').addEventListener('change', e => {
   commit();
 });
 
+$('expMode').addEventListener('change', renderSplit);
+$('expSplit').addEventListener('input', updateHint);
+$('expAmount').addEventListener('input', updateHint);
+
 $('expForm').addEventListener('submit', e => {
   e.preventDefault();
-  const amount = parseAmount($('expAmount').value);
+  const mode = $('expMode').value;
   const payer = $('expPayer').value;
-  const split = [...document.querySelectorAll('#expSplit input:checked')].map(i => i.value);
+  const inputs = [...$('expSplit').querySelectorAll('[data-m]')];
+  let amount = parseAmount($('expAmount').value);
+  let split, weights;
+  if (mode === 'equal') {
+    split = inputs.filter(i => i.checked).map(i => i.dataset.m);
+  } else {
+    weights = {};
+    inputs.forEach(i => {
+      const v = mode === 'shares' ? parseShare(i.value) : parseAmount(i.value);
+      if (v > 0) weights[i.dataset.m] = v;
+    });
+    split = Object.keys(weights);
+    if (mode === 'exact') {
+      const sum = split.reduce((s, id) => s + weights[id], 0);
+      if (!amount) amount = sum;
+      else if (sum !== amount) return toast(`Tổng đã chia ${fmt(sum)} chưa khớp số tiền ${fmt(amount)}`);
+    }
+  }
   if (!amount) return toast('Nhập số tiền hợp lệ (vd: 250000, 250k, 1.2tr)');
   if (!payer) return toast('Chọn người trả');
   if (!split.length) return toast('Chọn ít nhất 1 người để chia');
-  state.expenses.push({ id: uid(), desc: $('expDesc').value.trim(), amount, payer, split });
+
+  const exp = { id: uid(), desc: $('expDesc').value.trim(), amount, payer, mode, split };
+  if (weights) exp.weights = weights;
+  state.expenses.push(exp);
   $('expDesc').value = ''; $('expAmount').value = '';
+  if (mode === 'exact') inputs.forEach(i => i.value = '');
   $('expDesc').focus();
   commit();
 });
@@ -362,9 +542,22 @@ $('expenses').addEventListener('click', e => {
   commit();
 });
 $('btnAll').addEventListener('click', () => {
-  const boxes = [...document.querySelectorAll('#expSplit input')];
+  const boxes = [...document.querySelectorAll('#expSplit input[type=checkbox]')];
   const all = boxes.every(b => b.checked);
   boxes.forEach(b => b.checked = !all);
+});
+
+$('transfers').addEventListener('click', e => {
+  const d = e.target.dataset;
+  if (d.act !== 'pay') return;
+  state.payments.push({ id: uid(), from: d.from, to: d.to, amount: +d.amount, at: Date.now() });
+  commit();
+  toast(`Đã ghi nhận ${nameOf(d.from)} trả ${fmt(+d.amount)}`);
+});
+$('paidList').addEventListener('click', e => {
+  if (e.target.dataset.act !== 'undo') return;
+  state.payments = state.payments.filter(p => p.id !== e.target.dataset.id);
+  commit();
 });
 
 $('btnShare').addEventListener('click', async () => {
@@ -372,11 +565,6 @@ $('btnShare').addEventListener('click', async () => {
   const url = location.origin + location.pathname + '#' + b64;
   try { await navigator.clipboard.writeText(url); toast('Đã copy link bill'); }
   catch { prompt('Copy link này:', url); }
-});
-$('btnReset').addEventListener('click', () => {
-  if (!confirm('Xoá toàn bộ bill hiện tại?')) return;
-  state = { name: '', members: [], expenses: [] };
-  commit();
 });
 
 let tt;
