@@ -430,7 +430,7 @@
   <h3 id="confirmPayTitle"></h3>
   <p class="muted" id="confirmPayInfo" style="margin:8px 0"></p>
   <div class="row">
-    <button type="button" class="ghost" id="confirmPaySkip" style="flex:1">Chưa nhận</button>
+    <button type="button" class="ghost" id="confirmPaySkip" style="flex:1">Chưa nhận được</button>
     <button type="button" id="confirmPayConfirm" style="flex:1">✓ Đã nhận</button>
   </div>
 </dialog>
@@ -2238,7 +2238,18 @@ $('confirmPayConfirm').addEventListener('click', () => {
   pendingConfirm = null;
   toast('✓ Đã xác nhận nhận tiền');
 });
-$('confirmPaySkip').addEventListener('click', () => $('confirmPayDialog').close());
+// Người nhận báo chưa nhận được tiền: huỷ khoản trả, số nợ hiện lại để người trả chuyển lại
+$('confirmPaySkip').addEventListener('click', () => {
+  const p = pendingConfirm && state.payments.find(x => x.id === pendingConfirm.id);
+  if (!p || !confirm(`Huỷ khoản ${nameOf(p.from)} chuyển ${fmt(p.amount)}?
+
+Số nợ sẽ hiện lại để ${nameOf(p.from)} chuyển lại.`)) return;
+  state.payments = state.payments.filter(x => x.id !== p.id);
+  commit();
+  $('confirmPayDialog').close();
+  pendingConfirm = null;
+  toast(`Đã huỷ, ${nameOf(p.from)} cần chuyển lại`);
+});
 
 $('transfers').addEventListener('click', e => {
   const d = e.target.dataset;
