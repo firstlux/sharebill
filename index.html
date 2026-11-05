@@ -209,7 +209,10 @@
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
     background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 8px;
     opacity: 0; transition: opacity .2s; pointer-events: none; }
-  .toast.show { opacity: 1; }
+  .toast.show { opacity: 1; pointer-events: auto; }
+  .toast-act { background: none; color: inherit; border: 0; padding: 0 0 0 8px; font-weight: 700; text-decoration: underline; cursor: pointer; }
+  .bank-warn { margin-top: 10px; padding: 10px; border-left: 3px solid #dc2626; background: var(--chip); border-radius: 6px; font-size: 13px; word-break: break-word; }
+  .bank-warn button { width: 100%; margin-top: 8px; }
   .tabs button { white-space: nowrap; }
   @media (max-width: 560px) {
     .tabs button { padding: 8px 4px; font-size: 14px; }
@@ -393,6 +396,14 @@
     <span><b>App ngân hàng của bạn</b><br><span class="muted">Dùng cho nút “🏦 Mở app” ở mỗi mã QR (trên điện thoại)</span></span>
     <select id="setBankApp"></select>
   </label>
+  <div class="set-row">
+    <span><b>Sao lưu dữ liệu</b><br><span class="muted">Bill chưa bật sửa chung chỉ nằm trên máy này. File sao lưu có cả số tài khoản, hãy giữ kín.</span></span>
+    <span class="muted" id="backupNote"></span>
+    <div class="row">
+      <button type="button" class="ghost" id="btnBackup">⬇ Tải file sao lưu</button>
+      <label class="file-btn">⬆ Khôi phục<input type="file" id="restoreFile" accept=".json,application/json" hidden></label>
+    </div>
+  </div>
   <button type="button" class="ghost" id="settingsClose" style="width:100%;margin-top:14px">Xong</button>
 </dialog>
 <dialog id="appDialog">
@@ -591,6 +602,7 @@ function load() {
   // billId -> id thành viên "là tôi" trên máy này ('' = không hỏi / chỉ xem).
   // Bill đã có sẵn trên máy (tự tạo) thì không hỏi; chỉ hỏi bill mở từ link.
   if (!store.me) { store.me = {}; store.bills.forEach(b => store.me[b.id] = ''); }
+  store.seen ||= {};
   seedDirectory();
 
   const liveId = location.hash.match(/^#b=([\w-]{16,})$/);
@@ -706,12 +718,25 @@ function billGroupFor(b, gid) {
   return bg.id;
 }
 // Đẩy thông tin người trong danh bạ xuống mọi bill có người đó
-function propagatePerson(p) {
+// remote = true: thay đổi đến từ thiết bị khác, không tự tin tưởng STK mới
+function propagatePerson(p, remote = false) {
   for (const b of store.bills) for (const m of b.members) if (pidOf(m) === p.id) {
     Object.assign(m, { name: p.name, bank: p.bank, account: p.account });
     setGroups(m, groupsOf(p).map(gid => billGroupFor(b, gid)));
+    if (!remote) trustBank(b, m);
   }
 }
+// Mỗi máy nhớ STK đã thấy của từng thành viên. Ai có link cũng sửa được bill, nên STK
+// đổi từ nơi khác phải được người xem kiểm tra lại rồi mới hiện QR.
+const bankKey = m => m.bank && m.account ? `${m.bank}|${m.account.replace(/\s/g, '')}` : '';
+function trustBank(b, m) { (store.seen[b.id] ||= {})[m.id] = bankKey(m); }
+function seedBanks() {
+  const seen = store.seen[state.id] ||= {};
+  const fresh = state.members.filter(m => bankKey(m) && !seen[m.id]);
+  fresh.forEach(m => seen[m.id] = bankKey(m));
+  if (fresh.length) save();
+}
+const bankChanged = m => { const k = store.seen[state.id]?.[m.id]; return !!k && !!bankKey(m) && k !== bankKey(m); };
 function propagateGroup(g) {
   for (const b of store.bills) for (const bg of b.groups) if (pidOf(bg) === g.id) bg.name = g.name;
 }
@@ -928,7 +953,7 @@ function applyRemoteDir(val) {
   dirLive.ready = true;
   // Thay đổi từ thiết bị khác: cập nhật xuống các bill có người / nhóm đó
   store.groups.forEach(g => { if (beforeG.get(g.id) !== g.name) propagateGroup(g); });
-  store.people.forEach(p => { if (beforeP.get(p.id) !== stable(p)) propagatePerson(p); });
+  store.people.forEach(p => { if (beforeP.get(p.id) !== stable(p)) propagatePerson(p, true); });
   save();
   if (joining) {
     pushDir();
@@ -1354,6 +1379,7 @@ function render() {
         : sumRow('Chưa xếp nhóm', list.map(m => m.id), 'group-row') + memberRows(list, 'in-group')).join('');
 
   // Chuyển khoản + QR
+  seedBanks();
   const all = transfers.length + payments.length;
   $('progress').textContent = all ? `Đã trả ${payments.length}/${all} lượt` : '';
   $('transfers').innerHTML = transfers.map(t => {
@@ -1362,7 +1388,12 @@ function render() {
     const hasBank = to.bank && to.account;
     const info = transferInfo(from);
     const data = `data-from="${t.from}" data-to="${t.to}" data-amount="${t.amount}"`;
-    const qr = hasBank ? `<div class="qr">${qrSvg(qrPayload(to, t.amount, info))}</div>
+    const [oldBank, oldAcc] = (store.seen[state.id]?.[to.id] || '').split('|');
+    const qr = hasBank && bankChanged(to) ? `<div class="bank-warn"><b>⚠️ STK của ${esc(to.name)} vừa bị đổi</b><br>
+        Trước: ${esc(bankName(oldBank))} · ${esc(oldAcc)}<br>Giờ: ${esc(bankName(to.bank))} · ${esc(to.account)}<br>
+        Hỏi lại ${esc(to.name)} trước khi chuyển.
+        <button type="button" class="ghost" data-act="trustBank" data-m="${to.id}">Đã kiểm tra, hiện QR</button></div>`
+      : hasBank ? `<div class="qr">${qrSvg(qrPayload(to, t.amount, info))}</div>
       <div class="bank">${esc(bankName(to.bank))} · ${esc(to.account)}<br>ND: ${esc(noAccent(info))}</div>
       <button class="ghost" data-act="qrImg" ${data}>⬇ Tải ảnh QR</button>${appButtons(data)}`
       : `<div class="bank" style="margin-top:12px">⚠️ ${esc(to.name)} chưa nhập ngân hàng / số tài khoản<br>
@@ -1381,7 +1412,8 @@ function render() {
       <span class="who"><b class="${statusClass}">${statusIcon}</b> ${esc(nameOf(p.from))} → ${esc(nameOf(p.to))} · ${fmt(p.amount)}
         <span class="muted">· ${new Date(p.at).toLocaleDateString('vi-VN')}</span>
         ${p.status === 'pending' ? `<span class="muted"> (chờ ${esc(nameOf(p.to))} xác nhận)</span>` : ''}</span>
-      <button class="x" data-act="undo" data-id="${p.id}">Hoàn tác</button>
+      ${canUndoPay(p) ? `<button class="x" data-act="undo" data-id="${p.id}">Hoàn tác</button>`
+        : state.online && !meOf() ? '<button class="x" data-act="who">Chọn tên để hoàn tác</button>' : ''}
     </div>`;
   }).join('');
 }
@@ -1559,6 +1591,7 @@ function applyScan(text) {
   const x = list.find(i => i.id === scanTarget.id);
   if (!x) { stopScanner(); return true; }
   x.bank = info.bin; x.account = info.account;
+  if (scanTarget.list !== 'people') trustBank(state, x);
   const p = scanTarget.list === 'people' ? x : personOf(x);
   if (p) { p.bank = x.bank; p.account = x.account; propagatePerson(p); }
   stopScanner();
@@ -1660,6 +1693,7 @@ $('appClose').addEventListener('click', () => $('appDialog').close());
 
 // ---------- Cài đặt ----------
 $('btnSettings').addEventListener('click', () => {
+  renderBackupNote();
   $('setBankApp').innerHTML = '<option value="">— Hỏi mỗi lần bấm —</option>' +
     BANK_APPS.map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join('');
   $('setBankApp').value = savedApp() || '';
@@ -1672,8 +1706,83 @@ $('setBankApp').addEventListener('change', e => {
 });
 $('settingsClose').addEventListener('click', () => $('settingsDialog').close());
 
+// ---------- Sao lưu & khôi phục bằng file ----------
+function renderBackupNote() {
+  $('backupNote').textContent = store.lastBackup
+    ? `Lần sao lưu gần nhất: ${new Date(store.lastBackup).toLocaleDateString('vi-VN')}` : 'Máy này chưa sao lưu lần nào.';
+}
+$('btnBackup').addEventListener('click', async () => {
+  const text = JSON.stringify({ app: 'sharebill', version: 1, at: Date.now(), store });
+  const file = new File([text], `ShareBill_${isoDate(Date.now())}.json`, { type: 'application/json' });
+  let done = false;
+  // iPhone không tải file được trong app cài trên màn hình chính: dùng menu chia sẻ ("Lưu vào Tệp")
+  if (isIOS() && navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); done = true; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  if (!done) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file); a.download = file.name;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  store.lastBackup = Date.now();
+  save();
+  renderBackupNote();
+});
+
+// Khôi phục là gộp vào máy, không xoá gì: bill sửa chung đã có thì giữ bản trên máy (mạng mới hơn),
+// bill trên máy khác nội dung thì thêm một bản sao để người dùng tự so sánh.
+function restoreBackup(text) {
+  const data = JSON.parse(text), src = data.store;
+  if (data.app !== 'sharebill' || !Array.isArray(src?.bills)) throw new Error('not a backup');
+  const bills = src.bills.map(normalize);
+  const people = Array.isArray(src.people) ? src.people : [], groups = Array.isArray(src.groups) ? src.groups : [];
+  const blank = state;
+  const isBlank = !blank.online && !blank.name && !blank.members.length && !blank.expenses.length;
+  const adopt = (b, from) => {
+    store.bills.push(b);
+    store.me[b.id] = src.me?.[from] ?? '';
+    if (src.seen?.[from]) store.seen[b.id] = src.seen[from];
+  };
+  let added = 0, copies = 0;
+  for (const b of bills) {
+    const cur = store.bills.find(x => x.id === b.id);
+    if (!cur) {
+      try { localStorage.removeItem(LIVE_KEY + b.id); } catch (e) {}   // tránh đẩy dữ liệu cũ đè lên mạng
+      adopt(b, b.id); added++;
+    } else if (!b.online && !cur.online && stable(b) !== stable(cur)) {
+      adopt({ ...b, id: uid(), name: `${b.name || 'Bill'} (bản sao lưu)` }, b.id); copies++;
+    }
+  }
+  const merged = mergeLocalDir(people, groups);
+  endEdit();
+  if (isBlank && added + copies) { store.bills = store.bills.filter(b => b !== blank); selectBill(store.bills[0].id); }
+  commit();
+  return { added, copies, merged };
+}
+$('restoreFile').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  $('settingsDialog').close();
+  try {
+    const { added, copies, merged } = restoreBackup(await f.text());
+    toast(added + copies + merged
+      ? `Đã khôi phục ${added + copies} bill${copies ? ` (${copies} bản sao)` : ''}, ${merged} người vào danh bạ`
+      : 'Dữ liệu trong file đã có sẵn trên máy');
+  } catch (err) { console.warn(err); toast('File sao lưu không hợp lệ'); }
+});
+
 // ---------- "Bạn là ai trong bill?" (lưu trên máy, không đồng bộ) ----------
 const meOf = () => state.members.find(m => m.id === store.me[state.id]);
+// Bill sửa chung: khoản đã xác nhận chỉ người nhận được huỷ; khoản chưa xác nhận thì hai người trong cuộc.
+// Tên do người dùng tự chọn nên đây là chặn bấm nhầm, chưa phải phân quyền thật. Bill trên máy thì không giới hạn.
+const canUndoPay = p => {
+  if (!state.online) return true;
+  const me = store.me[state.id];
+  return !!me && (p.status === 'confirmed' ? me === p.to : me === p.from || me === p.to);
+};
 function maybeAskWho() {
   if (!askWho || askWho !== state.id || !state.members.length || state.id in store.me) return;
   askWho = null;
@@ -2003,6 +2112,7 @@ $('members').addEventListener('change', e => {
   const f = e.target.dataset.f; if (!f) return;
   const m = state.members.find(m => m.id === e.target.closest('.member').dataset.id);
   m[f] = e.target.value.trim();
+  trustBank(state, m);
   const p = personOf(m);
   if (p) { p[f] = m[f]; propagatePerson(p); }   // cập nhật danh bạ và các bill khác
   commit();
@@ -2108,8 +2218,15 @@ $('expenses').addEventListener('click', e => {
   if (act === 'editExp') return startEdit(id);
   if (act !== 'delExp') return;
   if (id === editingId) endEdit();
+  const bill = state, at = bill.expenses.findIndex(x => x.id === id), gone = bill.expenses[at];
   state.expenses = state.expenses.filter(x => x.id !== id);
   commit();
+  toast(`Đã xoá “${gone.desc || 'khoản chi'}” ${fmt(gone.amount)}`, { label: 'Hoàn tác', fn: () => {
+    if (state !== bill) return toast('Đã chuyển bill khác, không hoàn tác được');
+    if (bill.expenses.some(x => x.id === gone.id)) return;
+    bill.expenses.splice(Math.min(at, bill.expenses.length), 0, gone);
+    commit();
+  } });
 });
 $('expCancel').addEventListener('click', () => { endEdit(); render(); });
 
@@ -2253,6 +2370,7 @@ Số nợ sẽ hiện lại để ${nameOf(p.from)} chuyển lại.`)) return;
 
 $('transfers').addEventListener('click', e => {
   const d = e.target.dataset;
+  if (d.act === 'trustBank') { trustBank(state, state.members.find(m => m.id === d.m)); save(); return render(); }
   if (d.act === 'qrImg') return downloadQR(d.from, d.to, +d.amount);
   if (d.act === 'openApp' || d.act === 'pickApp') {
     const t = { from: d.from, to: d.to, amount: +d.amount };
@@ -2264,8 +2382,12 @@ $('transfers').addEventListener('click', e => {
   showPartialPayDialog(t);
 });
 $('paidList').addEventListener('click', e => {
+  if (e.target.dataset.act === 'who') return showWho();
   if (e.target.dataset.act !== 'undo') return;
-  state.payments = state.payments.filter(p => p.id !== e.target.dataset.id);
+  const p = state.payments.find(x => x.id === e.target.dataset.id);
+  if (!p || !canUndoPay(p)) return;
+  if (p.status === 'confirmed' && !confirm(`Huỷ khoản ${nameOf(p.from)} chuyển ${fmt(p.amount)} đã xác nhận?\n\nSố nợ sẽ hiện lại.`)) return;
+  state.payments = state.payments.filter(x => x !== p);
   commit();
 });
 
@@ -2306,9 +2428,18 @@ function canShare() { return !!navigator.share && matchMedia('(pointer: coarse)'
 if (canShare()) $('btnShare').textContent = '📤 Chia sẻ';
 
 let tt;
-function toast(msg) {
-  $('toast').textContent = msg; $('toast').classList.add('show');
-  clearTimeout(tt); tt = setTimeout(() => $('toast').classList.remove('show'), 2200);
+// action: { label, fn } hiện thêm một nút trong toast và để toast lâu hơn
+function toast(msg, action) {
+  const el = $('toast');
+  el.textContent = msg;
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'toast-act'; b.textContent = action.label;
+    b.onclick = () => { clearTimeout(tt); el.classList.remove('show'); action.fn(); };
+    el.append(' ', b);
+  }
+  el.classList.add('show');
+  clearTimeout(tt); tt = setTimeout(() => el.classList.remove('show'), action ? 6000 : 2200);
 }
 
 load();
@@ -2324,6 +2455,7 @@ maybeAskWho();
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(console.warn);
 }
+navigator.storage?.persist?.().catch(() => {});   // xin trình duyệt không tự xoá dữ liệu khi thiếu dung lượng
 </script>
 </body>
 </html>
