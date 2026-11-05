@@ -210,6 +210,9 @@
     background: var(--text); color: var(--bg); padding: 8px 16px; border-radius: 8px;
     opacity: 0; transition: opacity .2s; pointer-events: none; }
   .toast.show { opacity: 1; pointer-events: auto; }
+  .log-box summary { font-weight: 700; cursor: pointer; }
+  .log-line { padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; word-break: break-word; }
+  .log-line .when { display: block; color: var(--muted); font-size: 12px; }
   .toast-act { background: none; color: inherit; border: 0; padding: 0 0 0 8px; font-weight: 700; text-decoration: underline; cursor: pointer; }
   .bank-warn { margin-top: 10px; padding: 10px; border-left: 3px solid #dc2626; background: var(--chip); border-radius: 6px; font-size: 13px; word-break: break-word; }
   .bank-warn button { width: 100%; margin-top: 8px; }
@@ -366,6 +369,13 @@
     <p class="muted" style="margin-top:-6px">Số lần chuyển đã được tối giản. Quét QR bằng app ngân hàng bất kỳ (chuẩn VietQR/Napas). Chuyển xong thì bấm “Đã trả”.</p>
     <div class="transfers" id="transfers"></div>
     <div class="paid-list" id="paidList"></div>
+  </section>
+
+  <section class="card" data-page="bill">
+    <details class="log-box">
+      <summary>Lịch sử thay đổi <small id="logCount"></small></summary>
+      <div id="logList"></div>
+    </details>
   </section>
 </div>
 <dialog id="whoDialog">
@@ -576,11 +586,11 @@ let askWho = null;   // bill vừa mở lần đầu từ link: hỏi "bạn là
 const pad2 = n => String(n).padStart(2, '0');
 const isoDate = t => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 const viDate = iso => iso.split('-').reverse().join('/');
-const newBill = () => ({ id: uid(), name: '', created: Date.now(), date: isoDate(Date.now()), members: [], expenses: [], payments: [], groups: [] });
+const newBill = () => ({ id: uid(), name: '', created: Date.now(), date: isoDate(Date.now()), members: [], expenses: [], payments: [], groups: [], log: [] });
 function normalize(b) {
   // bổ sung field còn thiếu cho dữ liệu cũ (v1, link cũ)
   b.id ||= uid(); b.created ||= Date.now(); b.name ||= ''; b.date ||= isoDate(b.created);
-  b.members ||= []; b.expenses ||= []; b.payments ||= []; b.groups ||= [];
+  b.members ||= []; b.expenses ||= []; b.payments ||= []; b.groups ||= []; b.log ||= [];
   b.expenses.forEach(e => { e.mode ||= 'equal'; e.split ||= []; });
   b.members.forEach(m => { if ('group' in m) setGroups(m, groupsOf(m)); });   // 1 nhóm -> nhiều nhóm
   return b;
@@ -721,10 +731,23 @@ function billGroupFor(b, gid) {
 // remote = true: thay đổi đến từ thiết bị khác, không tự tin tưởng STK mới
 function propagatePerson(p, remote = false) {
   for (const b of store.bills) for (const m of b.members) if (pidOf(m) === p.id) {
+    const oldKey = bankKey(m);
     Object.assign(m, { name: p.name, bank: p.bank, account: p.account });
     setGroups(m, groupsOf(p).map(gid => billGroupFor(b, gid)));
-    if (!remote) trustBank(b, m);
+    if (!remote) { trustBank(b, m); logBank(b, m, oldKey); }
   }
+}
+// Lịch sử thay đổi của bill: ghi theo tên người đã chọn trên máy này (tên tự khai, không phải đăng nhập).
+// Mỗi dòng có id riêng nên nhiều người ghi cùng lúc không đè nhau.
+const LOG_MAX = 200;
+function logEvent(b, text) {
+  const by = b.members.find(m => m.id === store.me[b.id])?.name || '';
+  b.log.push({ id: uid(), at: Date.now(), by, text });
+  b.log.splice(0, b.log.length - LOG_MAX);
+}
+const bankLabel = k => { const [bin, acc] = k.split('|'); return acc ? `${bankName(bin)} · ${acc}` : 'trống'; };
+function logBank(b, m, oldKey) {
+  if (oldKey && oldKey !== bankKey(m)) logEvent(b, `đổi STK của ${m.name}: ${bankLabel(oldKey)} → ${bankLabel(bankKey(m))}`);
 }
 // Mỗi máy nhớ STK đã thấy của từng thành viên. Ai có link cũng sửa được bill, nên STK
 // đổi từ nơi khác phải được người xem kiểm tra lại rồi mới hiện QR.
@@ -766,7 +789,7 @@ function commit() { save(); render(); pushLive(); pushDir(); }
 // để nhiều người sửa cùng lúc mà không ghi đè nhau (chỉ ghi phần thay đổi).
 const FB_VER = '12.3.0';
 const LIVE_KEY = 'sharebill-sync-';
-const COLS = ['members', 'expenses', 'payments', 'groups'];
+const COLS = ['members', 'expenses', 'payments', 'groups', 'log'];
 let fb = null;
 let live = { id: null, unsub: [], last: null };
 
@@ -1380,6 +1403,7 @@ function render() {
 
   // Chuyển khoản + QR
   seedBanks();
+  renderLog();
   const all = transfers.length + payments.length;
   $('progress').textContent = all ? `Đã trả ${payments.length}/${all} lượt` : '';
   $('transfers').innerHTML = transfers.map(t => {
@@ -1416,6 +1440,14 @@ function render() {
         : state.online && !meOf() ? '<button class="x" data-act="who">Chọn tên để hoàn tác</button>' : ''}
     </div>`;
   }).join('');
+}
+
+function renderLog() {
+  const list = [...state.log].sort((a, b) => b.at - a.at);
+  $('logCount').textContent = list.length ? `(${list.length})` : '';
+  $('logList').innerHTML = list.map(l => `<div class="log-line"><b>${esc(l.by || (state.online ? 'Người chưa chọn tên' : 'Bạn'))}</b> ${esc(l.text)}
+    <span class="when">${new Date(l.at).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })}</span></div>`).join('')
+    || '<div class="empty">Chưa có thay đổi nào được ghi lại</div>';
 }
 
 // Trang "Thành viên của bill" và trang "Danh bạ"
@@ -1590,8 +1622,9 @@ function applyScan(text) {
   const list = scanTarget.list === 'people' ? store.people : state.members;
   const x = list.find(i => i.id === scanTarget.id);
   if (!x) { stopScanner(); return true; }
+  const oldKey = bankKey(x);
   x.bank = info.bin; x.account = info.account;
-  if (scanTarget.list !== 'people') trustBank(state, x);
+  if (scanTarget.list !== 'people') { trustBank(state, x); logBank(state, x, oldKey); }
   const p = scanTarget.list === 'people' ? x : personOf(x);
   if (p) { p.bank = x.bank; p.account = x.account; propagatePerson(p); }
   stopScanner();
@@ -2099,6 +2132,8 @@ $('members').addEventListener('click', e => {
   const used = state.expenses.some(x => x.payer === id || x.split.includes(id)) ||
                state.payments.some(p => p.from === id || p.to === id);
   if (used && !confirm('Thành viên này có trong khoản chi / thanh toán. Xoá sẽ bỏ họ khỏi các khoản đó. Tiếp tục?')) return;
+  const bill = state, who = nameOf(id);
+  const snap = structuredClone({ members: bill.members, expenses: bill.expenses, payments: bill.payments });
   state.members = state.members.filter(m => m.id !== id);
   state.payments = state.payments.filter(p => p.from !== id && p.to !== id);
   state.expenses = state.expenses.filter(x => x.payer !== id).map(x => {
@@ -2106,13 +2141,26 @@ $('members').addEventListener('click', e => {
     if (x.weights) delete x.weights[id];
     return x;
   }).filter(x => x.split.length);
+  logEvent(bill, `bỏ ${who} khỏi bill`);
   commit();
+  toast(`Đã bỏ ${who} khỏi bill`, { label: 'Hoàn tác', fn: () => {
+    if (state !== bill) return toast('Đã chuyển bill khác, không hoàn tác được');
+    // Đưa lại bản trước khi xoá, giữ những mục người khác vừa thêm
+    for (const c in snap) {
+      const ids = new Set(snap[c].map(x => x.id));
+      bill[c] = [...snap[c], ...bill[c].filter(x => !ids.has(x.id))];
+    }
+    logEvent(bill, `đưa ${who} trở lại bill`);
+    commit();
+  } });
 });
 $('members').addEventListener('change', e => {
   const f = e.target.dataset.f; if (!f) return;
   const m = state.members.find(m => m.id === e.target.closest('.member').dataset.id);
+  const oldKey = bankKey(m);
   m[f] = e.target.value.trim();
   trustBank(state, m);
+  logBank(state, m, oldKey);
   const p = personOf(m);
   if (p) { p[f] = m[f]; propagatePerson(p); }   // cập nhật danh bạ và các bill khác
   commit();
@@ -2203,10 +2251,15 @@ $('expForm').addEventListener('submit', e => {
   if (weights) data.weights = weights;
   const old = editingId && state.expenses.find(x => x.id === editingId);
   if (old) {
+    const before = old.amount;
     delete old.weights;
     Object.assign(old, data);   // giữ id và thứ tự
+    logEvent(state, `sửa khoản “${data.desc || 'khoản chi'}”` + (before !== amount ? `: ${fmt(before)} → ${fmt(amount)}` : ''));
     toast('Đã lưu khoản chi');
-  } else state.expenses.push({ id: uid(), ...data });
+  } else {
+    state.expenses.push({ id: uid(), ...data });
+    logEvent(state, `thêm khoản “${data.desc || 'khoản chi'}” ${fmt(amount)}`);
+  }
   if (editingId) endEdit(); else clearExpForm(false);
   $('expDesc').focus();
   commit();
@@ -2220,11 +2273,13 @@ $('expenses').addEventListener('click', e => {
   if (id === editingId) endEdit();
   const bill = state, at = bill.expenses.findIndex(x => x.id === id), gone = bill.expenses[at];
   state.expenses = state.expenses.filter(x => x.id !== id);
+  logEvent(bill, `xoá khoản “${gone.desc || 'khoản chi'}” ${fmt(gone.amount)}`);
   commit();
   toast(`Đã xoá “${gone.desc || 'khoản chi'}” ${fmt(gone.amount)}`, { label: 'Hoàn tác', fn: () => {
     if (state !== bill) return toast('Đã chuyển bill khác, không hoàn tác được');
     if (bill.expenses.some(x => x.id === gone.id)) return;
     bill.expenses.splice(Math.min(at, bill.expenses.length), 0, gone);
+    logEvent(bill, `khôi phục khoản “${gone.desc || 'khoản chi'}” ${fmt(gone.amount)}`);
     commit();
   } });
 });
@@ -2329,6 +2384,7 @@ $('partialPayConfirm').addEventListener('click', () => {
   }
   const t = pendingPay;
   state.payments.push({ id: uid(), from: t.from, to: t.to, amount, at: Date.now(), status: 'pending' });
+  logEvent(state, `ghi nhận ${nameOf(t.from)} trả ${nameOf(t.to)} ${fmt(amount)}`);
 
   commit();
   $('partialPayDialog').close();
@@ -2349,7 +2405,7 @@ function showConfirmPayDialog(p) {
 $('confirmPayConfirm').addEventListener('click', () => {
   if (!pendingConfirm) return;
   const p = state.payments.find(x => x.id === pendingConfirm.id);
-  if (p) p.status = 'confirmed';
+  if (p) { p.status = 'confirmed'; logEvent(state, `xác nhận đã nhận ${fmt(p.amount)} từ ${nameOf(p.from)}`); }
   commit();
   $('confirmPayDialog').close();
   pendingConfirm = null;
@@ -2362,6 +2418,7 @@ $('confirmPaySkip').addEventListener('click', () => {
 
 Số nợ sẽ hiện lại để ${nameOf(p.from)} chuyển lại.`)) return;
   state.payments = state.payments.filter(x => x.id !== p.id);
+  logEvent(state, `báo chưa nhận được ${fmt(p.amount)} từ ${nameOf(p.from)}`);
   commit();
   $('confirmPayDialog').close();
   pendingConfirm = null;
@@ -2388,6 +2445,7 @@ $('paidList').addEventListener('click', e => {
   if (!p || !canUndoPay(p)) return;
   if (p.status === 'confirmed' && !confirm(`Huỷ khoản ${nameOf(p.from)} chuyển ${fmt(p.amount)} đã xác nhận?\n\nSố nợ sẽ hiện lại.`)) return;
   state.payments = state.payments.filter(x => x !== p);
+  logEvent(state, `huỷ khoản ${nameOf(p.from)} trả ${nameOf(p.to)} ${fmt(p.amount)}`);
   commit();
 });
 
@@ -2401,7 +2459,7 @@ $('btnShare').addEventListener('click', async () => {
   let hash;
   if (state.online) hash = 'b=' + state.id;
   else {
-    const { online, ...b } = state;
+    const { online, log, ...b } = state;   // link bản chụp nằm trong URL nên bỏ lịch sử cho gọn
     hash = btoa(unescape(encodeURIComponent(JSON.stringify(b)))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   }
   const url = location.origin + location.pathname + '#' + hash;
