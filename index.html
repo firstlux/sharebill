@@ -143,7 +143,7 @@
   @media (prefers-color-scheme: dark) { .badge { color: #04201d; } }
   header .actions { margin-top: 6px; }
   header .actions button { padding: 6px 10px; font-size: 14px; }
-  header .actions #btnDelete { margin-left: auto; margin-right: -10px; }
+  header .actions #btnDelete { margin-left: auto; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
     padding: 16px; margin-bottom: 16px; }
   .card h2 { margin: 0 0 12px; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
@@ -160,6 +160,12 @@
   button.ghost:hover { color: var(--text); }
   button.x { background: transparent; color: var(--muted); padding: 2px 8px; font-weight: 400; }
   button.x:hover { color: var(--neg); }
+  button.danger { color: var(--neg); }
+  button.danger:hover { color: var(--neg); border-color: var(--neg); background: transparent; }
+  .tf .app-row { display: flex; gap: 8px; margin-top: 8px; }
+  .tf .app-row button { margin-top: 0; }
+  .tf .app-row [data-act="openApp"] { flex: 1; min-width: 0; }
+  .tf .app-row [data-act="pickApp"] { flex: none; width: auto; }
   .grow { flex: 1; }
   .muted { color: var(--muted); font-size: 13px; }
   table { width: 100%; border-collapse: collapse; }
@@ -257,7 +263,7 @@
       <button class="ghost" id="btnShare" title="Chia sẻ bill với nhóm">🔗 Copy link</button>
       <button class="ghost" id="btnLive" hidden title="Cho phép nhóm sửa bill cùng lúc từ các thiết bị khác nhau">☁️ Bật sửa chung</button>
       <span id="liveStatus" class="live-status" hidden title="Chỉ ai có link mới xem và sửa được bill này"></span>
-      <button class="x" id="btnDelete" title="Xoá bill">Xoá bill</button>
+      <button class="ghost danger" id="btnDelete" title="Xoá bill">🗑 Xoá bill</button>
     </div>
     <div id="liveHint" class="muted" style="font-size:13px;margin-top:6px;display:none">💡 Bật sửa chung trước để nhóm cùng xem & sửa bill realtime qua link.</div>
   </header>
@@ -1658,8 +1664,8 @@ const appName = id => (BANK_APPS.find(a => a[0] === id) || [, ''])[1];
 function appButtons(data) {
   if (!matchMedia('(pointer: coarse)').matches) return '';   // chỉ có ý nghĩa trên điện thoại
   const app = savedApp();
-  return `<button class="ghost" data-act="openApp" ${data}>🏦 ${app ? 'Mở ' + esc(appName(app)) : 'Mở app ngân hàng'}</button>` +
-    (app ? `<button class="x" data-act="pickApp" ${data}>đổi app</button>` : '');
+  return `<div class="app-row"><button class="ghost" data-act="openApp" ${data}>🏦 ${app ? 'Mở ' + esc(appName(app)) : 'Mở app ngân hàng'}</button>` +
+    (app ? `<button class="ghost" data-act="pickApp" ${data} title="Chọn app ngân hàng khác">Đổi app</button>` : '') + '</div>';
 }
 // Deeplink chỉ mở được app (không truyền STK/số tiền) → hướng dẫn: lưu ảnh QR rồi quét ảnh trong app
 function openBankApp(appId, t) {
