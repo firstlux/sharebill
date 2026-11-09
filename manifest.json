@@ -1,12 +1,12 @@
 {
-  "name": "ShareBill - Chia tiền nhóm",
+  "name": "ShareBill - Chia tiền nhậu",
   "short_name": "ShareBill",
-  "description": "Chia bill nhóm, tối giản chuyển khoản và tạo mã VietQR",
+  "description": "Chia tiền kèo nhậu, tối giản chuyển khoản và tạo mã VietQR",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f5f6f8",
-  "theme_color": "#0f766e",
+  "background_color": "#f8eedc",
+  "theme_color": "#b45309",
   "lang": "vi",
   "icons": [
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },

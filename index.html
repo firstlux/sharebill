@@ -4,37 +4,50 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ShareBill</title>
-<meta name="theme-color" content="#0f766e">
+<meta name="theme-color" content="#b45309" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17110b" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="ShareBill">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&display=swap">
 <script src="firebase-config.js"></script>
 <script src="qrcode.min.js"></script>
 <style>
+  /* Phong cách quán nhậu: bia hổ phách, bọt kem, ghế nhựa đỏ, đêm quán vỉa hè */
   :root {
-    --bg: #f5f6f8; --card: #fff; --text: #1d2330; --muted: #6b7280;
-    --line: #e5e7eb; --primary: #0f766e; --primary-2: #115e59;
-    --pos: #15803d; --neg: #b91c1c; --chip: #f0fdfa;
+    --bg: #f8eedc; --card: #fffaf0; --text: #2a1a0c; --muted: #7a6250;
+    --line: #ead8b8; --primary: #b45309; --primary-2: #92400e;
+    --pos: #3f7d20; --neg: #c0262d; --chip: #fdf0d5;
+    --on-primary: #fffaf0; --stool: #d62828; --foam: #fffaf0;
+    --display: "Baloo 2", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #11141a; --card: #1a1f28; --text: #e5e7eb; --muted: #9ca3af;
-      --line: #2b3240; --primary: #2dd4bf; --primary-2: #5eead4;
-      --pos: #4ade80; --neg: #f87171; --chip: #0f2a28;
+      --bg: #17110b; --card: #231a12; --text: #f6ead7; --muted: #bfa58a;
+      --line: #3a2c1e; --primary: #f5b52e; --primary-2: #ffcb5c;
+      --pos: #8bd36a; --neg: #ff7a6b; --chip: #33240f;
+      --on-primary: #2a1600; --stool: #e2443f; --foam: #fff4d6;
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { margin: 0; color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* sọc ca rô mờ như khăn trải bàn quán */
+    background: var(--bg) repeating-linear-gradient(45deg, transparent 0 22px, color-mix(in srgb, var(--primary) 4%, transparent) 22px 44px); }
+  h2, h3, button, .tabs, #billName, .tile .v, .tf .amt, .done-all { font-family: var(--display); }
+  .brand { flex: none; width: 44px; height: 44px; border-radius: 12px; margin-right: 6px;
+    box-shadow: 0 3px 0 color-mix(in srgb, var(--stool) 45%, transparent); transform: rotate(-4deg); }
   .wrap { max-width: 880px; margin: 0 auto; padding: 20px 16px 60px; }
   header { margin-bottom: 12px; }
   header .top { flex-wrap: nowrap; align-items: flex-start; }
   :root { color-scheme: light dark; }
   /* lùi trái đúng bằng padding của ô nhập để chữ thẳng hàng với các nút và khung bên dưới */
   .title-box { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; margin-left: -9px; }
-  #billName { width: 100%; font-size: 20px; font-weight: 700; background: transparent; border-color: transparent; padding: 4px 8px; }
+  #billName { width: 100%; font-size: 22px; font-weight: 800; line-height: 1.25; background: transparent; border-color: transparent; padding: 4px 8px; }
   #billDate { font-size: 13px; color: var(--muted); background: transparent; border-color: transparent; padding: 2px 8px; }
   #billName:hover, #billDate:hover { border-color: var(--line); }
   tr.editing td { background: var(--chip); }
@@ -80,7 +93,7 @@
   #whoDialog p { margin: 0 0 12px; }
   .who-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-bottom: 12px; }
   .who-list button { background: var(--card); color: var(--text); border: 1px solid var(--line); padding: 12px 10px; border-radius: 10px; cursor: pointer; font-weight: 500; transition: all 0.15s; }
-  .who-list button:hover { border-color: var(--primary); background: var(--chip); box-shadow: 0 2px 8px rgba(15, 118, 110, 0.1); }
+  .who-list button:hover { border-color: var(--primary); background: var(--chip); box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 18%, transparent); }
   #whoSkip { margin-top: 10px; width: 100%; }
   .me-card { border-color: var(--primary); }
   .me-card.gone, #emptyCard.gone { display: none; }   /* setTab bật/tắt [hidden], nên ẩn ô này bằng class riêng */
@@ -139,22 +152,25 @@
   button.icon-btn:hover, .icon-btn:hover { background: var(--chip); }
   .picker select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
   .badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px;
-    border-radius: 999px; background: var(--primary); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; }
-  @media (prefers-color-scheme: dark) { .badge { color: #04201d; } }
+    border-radius: 999px; background: var(--stool); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; }
+  
   header .actions { margin-top: 6px; }
   header .actions button { padding: 6px 10px; font-size: 14px; }
   header .actions #btnDelete { margin-left: auto; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    box-shadow: 0 2px 0 var(--line);
     padding: 16px; margin-bottom: 16px; }
-  .card h2 { margin: 0 0 12px; font-size: 16px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .card h2 { margin: 0 0 12px; font-size: 18px; line-height: 1.3; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
   .card h2 small { font-weight: 500; color: var(--muted); font-size: 13px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   input, select { font: inherit; color: var(--text); background: var(--bg);
     border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
   input:focus, select:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
   button { font: inherit; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer;
-    background: var(--primary); color: #fff; font-weight: 600; }
-  @media (prefers-color-scheme: dark) { button { color: #04201d; } }
+    background: var(--primary); color: var(--on-primary); font-weight: 700; }
+  /* nút chính dày như nắp két bia */
+  button:not([class]), .tabs button[aria-selected="true"] { box-shadow: inset 0 -3px 0 rgb(0 0 0 / .18); }
+  .tabs button:not([aria-selected="true"]) { box-shadow: none; }
   button:hover { background: var(--primary-2); }
   button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
   button.ghost:hover { color: var(--text); }
@@ -187,7 +203,7 @@
   .transfers { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
   .tf { border: 1px solid var(--line); border-radius: 12px; padding: 12px; text-align: center; }
   .tf .who { font-weight: 600; }
-  .tf .amt { font-size: 20px; font-weight: 700; color: var(--primary); margin: 4px 0; }
+  .tf .amt { font-size: 24px; font-weight: 800; color: var(--primary); margin: 4px 0; }
   .tf .qr { background: #fff; border-radius: 8px; padding: 8px; display: inline-block; margin-top: 8px; }
   .tf .qr svg { display: block; width: 200px; height: 200px; }
   .tf .bank { font-size: 13px; color: var(--muted); margin-top: 6px; word-break: break-word; }
@@ -196,13 +212,12 @@
   .paid { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px dashed var(--line); }
   .paid .who { flex: 1; color: var(--muted); }
   .paid .who b { color: var(--pos); }
-  .done-all { text-align: center; padding: 12px; font-weight: 600; color: var(--pos); }
+  .done-all { text-align: center; padding: 12px; font-size: 18px; font-weight: 800; color: var(--pos); }
   .tabs { position: sticky; top: 0; z-index: 5; display: flex; gap: 4px; padding: 6px;
     margin: 0 0 16px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
   .tabs button { flex: 1; background: transparent; color: var(--muted); }
   .tabs button:hover { background: var(--chip); color: var(--text); }
-  .tabs button[aria-selected="true"] { background: var(--primary); color: #fff; }
-  @media (prefers-color-scheme: dark) { .tabs button[aria-selected="true"] { color: #04201d; } }
+  .tabs button[aria-selected="true"] { background: var(--primary); color: var(--on-primary); }
   .tabs .count { font-weight: 400; opacity: .8; }
   .linklike { background: none; color: var(--primary); padding: 0; font-weight: 600; }
   .linklike:hover { background: none; text-decoration: underline; }
@@ -220,7 +235,7 @@
   .log-line { padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; word-break: break-word; }
   .log-line .when { display: block; color: var(--muted); font-size: 12px; }
   .toast-act { background: none; color: inherit; border: 0; padding: 0 0 0 8px; font-weight: 700; text-decoration: underline; cursor: pointer; }
-  .bank-warn { margin-top: 10px; padding: 10px; border-left: 3px solid #dc2626; background: var(--chip); border-radius: 6px; font-size: 13px; word-break: break-word; }
+  .bank-warn { margin-top: 10px; padding: 10px; border-left: 3px solid var(--neg); background: var(--chip); border-radius: 6px; font-size: 13px; word-break: break-word; }
   .bank-warn button { width: 100%; margin-top: 8px; }
   .tabs button { white-space: nowrap; }
   @media (max-width: 560px) {
@@ -241,6 +256,7 @@
     .exp-form #expSubmit { flex: 1 1 50%; margin-top: 4px; }
     .exp-form #expCancel { flex: 1 1 50%; margin-top: 4px; }
     .hide-sm { display: none; }
+    #btnDelete .lbl { display: none; }
     .show-sm { display: table-cell; }
   }
 </style>
@@ -249,8 +265,9 @@
 <div class="wrap">
   <header>
     <div class="row top">
+      <img class="brand" src="icon.svg" alt="ShareBill" width="44" height="44">
       <div class="title-box grow">
-        <input id="billName" placeholder="Tên bill, vd: Đi Đà Lạt" aria-label="Tên bill">
+        <input id="billName" placeholder="Tên kèo, vd: Lẩu dê thứ Sáu" aria-label="Tên bill">
         <input id="billDate" type="date" aria-label="Ngày bill" title="Ngày bill">
       </div>
       <label class="icon-btn picker" title="Chọn bill khác">📂<span class="badge" id="billCount" hidden></span>
@@ -263,7 +280,7 @@
       <button class="ghost" id="btnShare" title="Chia sẻ bill với nhóm">🔗 Copy link</button>
       <button class="ghost" id="btnLive" hidden title="Cho phép nhóm sửa bill cùng lúc từ các thiết bị khác nhau">☁️ Bật sửa chung</button>
       <span id="liveStatus" class="live-status" hidden title="Chỉ ai có link mới xem và sửa được bill này"></span>
-      <button class="ghost danger" id="btnDelete" title="Xoá bill">🗑 Xoá bill</button>
+      <button class="ghost danger" id="btnDelete" title="Xoá bill" aria-label="Xoá bill">🗑<span class="lbl"> Xoá bill</span></button>
     </div>
     <div id="liveHint" class="muted" style="font-size:13px;margin-top:6px;display:none">💡 Bật sửa chung trước để nhóm cùng xem & sửa bill realtime qua link.</div>
   </header>
@@ -291,7 +308,7 @@
   </section>
 
   <section class="card" data-page="dir">
-    <h2>Danh bạ <small>dùng chung cho mọi bill</small></h2>
+    <h2>Danh bạ <small>của bạn · chọn nhanh khi thêm người vào bill</small></h2>
     <div id="dirSync" class="groups-box" hidden></div>
     <div class="groups-box">
       <div class="chips" id="groupChips"></div>
@@ -334,9 +351,9 @@
   </section>
 
   <section class="card" data-page="bill">
-    <h2>1. Khoản chi</h2>
+    <h2>🍺 1. Khoản chi</h2>
     <form class="row exp-form" id="expForm">
-      <input id="expDesc" class="grow" placeholder="Nội dung, vd: Ăn tối" autocomplete="off">
+      <input id="expDesc" class="grow" placeholder="Nội dung, vd: Két Tiger" autocomplete="off">
       <input id="expAmount" inputmode="numeric" placeholder="Số tiền, vd 250k" style="width:150px" autocomplete="off">
       <select id="expPayer" title="Người trả"></select>
       <button id="expSubmit">Thêm</button>
@@ -361,7 +378,7 @@
   </section>
 
   <section class="card" data-page="bill">
-    <h2>2. Tổng kết</h2>
+    <h2>🧮 2. Tổng kết</h2>
     <div style="overflow-x:auto">
       <table>
         <thead><tr><th>Thành viên</th><th class="num">Đã chi</th><th class="num">Phần phải chịu</th><th class="num">Chênh lệch</th></tr></thead>
@@ -371,7 +388,7 @@
   </section>
 
   <section class="card" data-page="bill">
-    <h2>3. Chuyển khoản &amp; mã QR <small id="progress"></small></h2>
+    <h2>💸 3. Chuyển khoản &amp; mã QR <small id="progress"></small></h2>
     <p class="muted" style="margin-top:-6px">Số lần chuyển đã được tối giản. Quét QR bằng app ngân hàng bất kỳ (chuẩn VietQR/Napas). Chuyển xong thì bấm “Đã trả”.</p>
     <div class="transfers" id="transfers"></div>
     <div class="paid-list" id="paidList"></div>
@@ -1432,7 +1449,7 @@ function render() {
       ${isMine(t) ? `<div class="mine-tag">${t.from === meId ? 'BẠN CẦN CHUYỂN' : 'BẠN SẼ NHẬN'}</div>` : ''}
       <div class="who">${esc(from.name)} → ${esc(to.name)}</div><div class="amt">${fmt(t.amount)}</div>${qr}
       <button data-act="pay" ${data}>✓ Đã trả</button></div>`;
-  }).join('') || (payments.length ? '<div class="done-all">🎉 Đã thanh toán xong!</div>'
+  }).join('') || (payments.length ? '<div class="done-all">🍻 Sạch nợ! Dzô 100%!</div>'
                                   : '<div class="empty">Không có khoản nào cần chuyển</div>');
   $('paidList').innerHTML = payments.map(p => {
     const statusIcon = p.status === 'pending' ? '⏳' : '✓';
@@ -1841,7 +1858,7 @@ function setMe(id) {
   $('whoDialog').close();
   render();
   const me = meOf();
-  if (me) toast(`Chào ${me.name}! Phần của bạn ở đầu trang.`);
+  if (me) toast(`Dzô ${me.name}! Phần của bạn ở đầu trang.`);
 }
 $('whoList').addEventListener('click', e => { const id = e.target.dataset.who; if (id) setMe(id); });
 $('whoNewForm').addEventListener('submit', e => {
@@ -1965,7 +1982,7 @@ function renderReport() {
           <span class="amt ${l.owe ? 'neg' : 'pos'}">${fmt(l.amount)}</span></div>`).join('')}
         ${p.owe ? `<button class="ghost" data-remind="${esc(p.key)}" style="margin-top:8px">📤 Nhắc nợ</button>` : ''}
       </div>
-    </details>`).join('') || '<div class="empty">🎉 Không ai còn nợ</div>';
+    </details>`).join('') || '<div class="empty">🍻 Không ai còn nợ, hẹn kèo sau!</div>';
 
   $('reportBills').innerHTML = bills.map(x => `
     <button class="rb ${x.left ? '' : 'done'}" data-open="${x.b.id}">
@@ -1982,7 +1999,7 @@ async function remind(key) {
   const lines = p.lines.filter(l => l.owe);
   const links = [...new Set(lines.filter(l => l.b.online)
     .map(l => `${l.b.name || 'Bill'}: ${location.origin + location.pathname}#b=${l.b.id}`))];
-  const text = `Nhắc nhẹ ${p.name} 🙏 còn các khoản chưa chuyển:\n` +
+  const text = `Ê ${p.name} ơi 🍺 nhậu xong nhớ trả nè, còn các khoản chưa chuyển:\n` +
     lines.map(l => `• ${l.b.name || 'Bill'} (${viDate(l.b.date)}): chuyển ${l.other} ${fmt(l.amount)}`).join('\n') +
     `\nTổng: ${fmt(p.owe)}` + (links.length ? `\n\nMở để quét QR chuyển khoản:\n${links.join('\n')}` : '');
   if (canShare()) {
