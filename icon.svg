@@ -7,36 +7,31 @@
   </defs>
   <rect id="bg" width="512" height="512" rx="112" fill="#d62828"/>
   <g id="art">
-    <g transform="rotate(-8 256 270)">
-      <!-- quai ly -->
-      <path d="M344 222h22a46 46 0 0 1 46 46v46a46 46 0 0 1-46 46h-22" fill="none" stroke="#fff4d6" stroke-width="30"/>
-      <!-- thân ly bia -->
-      <rect x="124" y="178" width="230" height="244" rx="36" fill="url(#beer)" stroke="#fff4d6" stroke-width="16"/>
-      <rect x="150" y="238" width="16" height="152" rx="8" fill="#fff4d6" opacity=".45"/>
-      <circle cx="312" cy="250" r="6" fill="#fff4d6" opacity=".8"/>
-      <circle cx="306" cy="384" r="8" fill="#fff4d6" opacity=".8"/>
-      <circle cx="186" cy="404" r="5" fill="#fff4d6" opacity=".8"/>
-      <!-- chữ đ: chia tiền -->
-      <g fill="none" stroke="#5a2d06" stroke-linecap="round">
-        <circle cx="228" cy="338" r="36" stroke-width="24"/>
-        <path d="M266 254v122" stroke-width="24"/>
-        <path d="M244 270h46" stroke-width="16"/>
-      </g>
-      <!-- bọt bia -->
-      <g fill="#fffaf0">
-        <rect x="118" y="172" width="242" height="44" rx="22"/>
-        <circle cx="152" cy="180" r="42"/>
-        <circle cx="212" cy="158" r="50"/>
-        <circle cx="280" cy="160" r="48"/>
-        <circle cx="334" cy="184" r="40"/>
-        <rect x="288" y="200" width="28" height="56" rx="14"/>
-      </g>
+    <!-- tờ bill răng cưa đổ đầy bia -->
+    <path d="M140 168H372V396L357.5 418L343 396L314 418L285 396L256 418L227 396L198 418L169 396L154.5 418L140 396Z"
+      fill="url(#beer)" stroke="#fff4d6" stroke-width="14" stroke-linejoin="round"/>
+    <!-- dòng kẻ trên bill -->
+    <g fill="none" stroke="#5a2d06" stroke-linecap="round" opacity=".85">
+      <path d="M176 262H300" stroke-width="16"/>
+      <path d="M176 304H268" stroke-width="16"/>
     </g>
-    <!-- bọt văng: dzô! -->
+    <!-- chữ đ: chia tiền -->
+    <g fill="none" stroke="#5a2d06" stroke-linecap="round">
+      <circle cx="300" cy="352" r="22" stroke-width="15"/>
+      <path d="M322 318v56" stroke-width="15"/>
+      <path d="M310 326h26" stroke-width="10"/>
+    </g>
+    <!-- bọt bia trào lên, chảy xuống mép bill, văng ra ngoài -->
     <g fill="#fffaf0">
-      <circle cx="396" cy="120" r="13"/>
-      <circle cx="428" cy="160" r="8"/>
-      <circle cx="104" cy="124" r="10"/>
+      <rect x="128" y="160" width="256" height="40" rx="20"/>
+      <circle cx="164" cy="166" r="40"/>
+      <circle cx="226" cy="142" r="48"/>
+      <circle cx="292" cy="146" r="44"/>
+      <circle cx="350" cy="168" r="38"/>
+      <rect x="180" y="190" width="26" height="54" rx="13"/>
+      <rect x="318" y="190" width="22" height="38" rx="11"/>
+      <circle cx="404" cy="112" r="12"/>
+      <circle cx="110" cy="118" r="9"/>
     </g>
   </g>
 </svg>
