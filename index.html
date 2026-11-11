@@ -156,7 +156,7 @@
   
   header .actions { margin-top: 6px; }
   header .actions button { padding: 6px 10px; font-size: 14px; }
-  header .actions #btnDelete { margin-left: auto; }
+  header .actions #btnDup { margin-left: auto; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
     box-shadow: 0 2px 0 var(--line);
     padding: 16px; margin-bottom: 16px; }
@@ -256,7 +256,7 @@
     .exp-form #expSubmit { flex: 1 1 50%; margin-top: 4px; }
     .exp-form #expCancel { flex: 1 1 50%; margin-top: 4px; }
     .hide-sm { display: none; }
-    #btnDelete .lbl { display: none; }
+    #btnDelete .lbl, #btnDup .lbl { display: none; }
     .show-sm { display: table-cell; }
   }
 </style>
@@ -280,6 +280,7 @@
       <button class="ghost" id="btnShare" title="Chia sẻ bill với nhóm">🔗 Copy link</button>
       <button class="ghost" id="btnLive" hidden title="Cho phép nhóm sửa bill cùng lúc từ các thiết bị khác nhau">☁️ Bật sửa chung</button>
       <span id="liveStatus" class="live-status" hidden title="Chỉ ai có link mới xem và sửa được bill này"></span>
+      <button class="ghost" id="btnDup" title="Tạo bill mới với cùng thành viên, chưa có khoản chi" aria-label="Nhân bản bill">📑<span class="lbl"> Nhân bản</span></button>
       <button class="ghost danger" id="btnDelete" title="Xoá bill" aria-label="Xoá bill">🗑<span class="lbl"> Xoá bill</span></button>
     </div>
     <div id="liveHint" class="muted" style="font-size:13px;margin-top:6px;display:none">💡 Bật sửa chung trước để nhóm cùng xem & sửa bill realtime qua link.</div>
@@ -2078,6 +2079,24 @@ $('btnNew').addEventListener('click', () => {
   commit();
   setTab('members');
   $('billName').focus();
+});
+// Nhân bản: giữ thành viên, nhóm, STK, tên "tôi"; bỏ khoản chi, khoản trả, lịch sử.
+// Giữ nguyên id thành viên để vẫn gắn với danh bạ và gộp đúng người trong tab Báo cáo.
+$('btnDup').addEventListener('click', () => {
+  if (!state.members.length) return toast('Bill chưa có thành viên để nhân bản');
+  endEdit();
+  const src = state, b = newBill();
+  b.name = `${src.name || 'Bill'} (bản sao)`;
+  b.members = JSON.parse(JSON.stringify(src.members));
+  b.groups = JSON.parse(JSON.stringify(src.groups));
+  store.bills.unshift(b);
+  store.me[b.id] = store.me[src.id] ?? '';
+  if (store.seen[src.id]) store.seen[b.id] = { ...store.seen[src.id] };
+  selectBill(b.id);
+  commit();
+  setTab('bill');
+  toast(`Đã nhân bản ${b.members.length} người, nhập khoản chi mới nhé`);
+  $('billName').focus(); $('billName').select();
 });
 $('btnLive').addEventListener('click', goLive);
 $('btnDelete').addEventListener('click', () => {
