@@ -2,9 +2,42 @@
   "rules": {
     "bills": {
       "$billId": {
-        ".read": "$billId.length >= 16",
-        ".write": "$billId.length >= 16 && newData.exists()",
-        ".validate": "newData.hasChildren(['created'])"
+        ".read": "auth != null && $billId.length >= 16",
+        ".write": "auth != null && $billId.length >= 16 && newData.exists() && (data.exists() ? (!data.child('owners').exists() || data.child('owners').child(auth.uid).val() === true) : newData.child('owners').child(auth.uid).val() === true)",
+        ".validate": "newData.hasChildren(['created'])",
+        "members": {
+          "$mid": {
+            ".write": "auth != null && newData.exists() && (!data.exists() || newData.parent().parent().child('claims').child($mid).val() === auth.uid)",
+            ".validate": "newData.child('id').val() === $mid"
+          }
+        },
+        "claims": {
+          "$mid": {
+            ".write": "auth != null && ((!data.exists() && newData.val() === auth.uid && newData.parent().parent().child('members').child($mid).exists()) || (data.val() === auth.uid && !newData.exists()))",
+            ".validate": "newData.isString()"
+          }
+        },
+        "expenses": {
+          "$eid": {
+            ".write": "auth != null && ((!data.exists() && newData.child('by').val() === auth.uid) || (data.exists() && data.child('by').val() === auth.uid && (!newData.exists() || newData.child('by').val() === data.child('by').val())))",
+            ".validate": "newData.child('id').val() === $eid"
+          }
+        },
+        "groups": {
+          "$gid": {
+            ".write": "auth != null && !data.exists() && newData.exists()"
+          }
+        },
+        "log": {
+          "$lid": {
+            ".write": "auth != null && !data.exists() && newData.exists()"
+          }
+        },
+        "payments": {
+          "$pid": {
+            ".write": "auth != null"
+          }
+        }
       }
     },
     "dirs": {

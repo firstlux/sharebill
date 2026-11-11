@@ -234,6 +234,8 @@
   .log-box summary { font-weight: 700; cursor: pointer; }
   .log-line { padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; word-break: break-word; }
   .log-line .when { display: block; color: var(--muted); font-size: 12px; }
+  #billName:disabled, #billDate:disabled { opacity: 1; -webkit-text-fill-color: currentColor; cursor: default; }
+  input:disabled, select:disabled { opacity: .65; }
   .toast-act { background: none; color: inherit; border: 0; padding: 0 0 0 8px; font-weight: 700; text-decoration: underline; cursor: pointer; }
   .bank-warn { margin-top: 10px; padding: 10px; border-left: 3px solid var(--neg); background: var(--chip); border-radius: 6px; font-size: 13px; word-break: break-word; }
   .bank-warn button { width: 100%; margin-top: 8px; }
@@ -281,6 +283,7 @@
       <button class="ghost" id="btnLive" hidden title="Cho phép nhóm sửa bill cùng lúc từ các thiết bị khác nhau">☁️ Bật sửa chung</button>
       <span id="liveStatus" class="live-status" hidden title="Chỉ ai có link mới xem và sửa được bill này"></span>
       <button class="ghost" id="btnDup" title="Tạo bill mới với cùng thành viên, chưa có khoản chi" aria-label="Nhân bản bill">📑<span class="lbl"> Nhân bản</span></button>
+      <button class="ghost" id="btnOwn" hidden title="Bill này chưa có chủ nên ai cũng sửa được hết. Chủ bill mới khoá được quyền sửa của người khác.">🔒 Nhận làm chủ</button>
       <button class="ghost danger" id="btnDelete" title="Xoá bill" aria-label="Xoá bill">🗑<span class="lbl"> Xoá bill</span></button>
     </div>
     <div id="liveHint" class="muted" style="font-size:13px;margin-top:6px;display:none">💡 Bật sửa chung trước để nhóm cùng xem & sửa bill realtime qua link.</div>
@@ -610,11 +613,11 @@ let askWho = null;   // bill vừa mở lần đầu từ link: hỏi "bạn là
 const pad2 = n => String(n).padStart(2, '0');
 const isoDate = t => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 const viDate = iso => iso.split('-').reverse().join('/');
-const newBill = () => ({ id: uid(), name: '', created: Date.now(), date: isoDate(Date.now()), members: [], expenses: [], payments: [], groups: [], log: [] });
+const newBill = () => ({ id: uid(), name: '', created: Date.now(), date: isoDate(Date.now()), members: [], expenses: [], payments: [], groups: [], log: [], owners: {}, claims: {} });
 function normalize(b) {
   // bổ sung field còn thiếu cho dữ liệu cũ (v1, link cũ)
   b.id ||= uid(); b.created ||= Date.now(); b.name ||= ''; b.date ||= isoDate(b.created);
-  b.members ||= []; b.expenses ||= []; b.payments ||= []; b.groups ||= []; b.log ||= [];
+  b.members ||= []; b.expenses ||= []; b.payments ||= []; b.groups ||= []; b.log ||= []; b.owners ||= {}; b.claims ||= {};
   b.expenses.forEach(e => { e.mode ||= 'equal'; e.split ||= []; });
   b.members.forEach(m => { if ('group' in m) setGroups(m, groupsOf(m)); });   // 1 nhóm -> nhiều nhóm
   return b;
@@ -765,9 +768,9 @@ function propagatePerson(p, remote = false) {
 // Mỗi dòng có id riêng nên nhiều người ghi cùng lúc không đè nhau.
 const LOG_MAX = 200;
 function logEvent(b, text) {
-  const by = b.members.find(m => m.id === store.me[b.id])?.name || '';
+  const by = b.members.find(m => m.id === myId(b))?.name || '';
   b.log.push({ id: uid(), at: Date.now(), by, text });
-  b.log.splice(0, b.log.length - LOG_MAX);
+  if (isOwner(b)) b.log.splice(0, b.log.length - LOG_MAX);   // người thường không xoá được dòng cũ
 }
 const bankLabel = k => { const [bin, acc] = k.split('|'); return acc ? `${bankName(bin)} · ${acc}` : 'trống'; };
 function logBank(b, m, oldKey) {
@@ -818,14 +821,26 @@ let fb = null;
 let live = { id: null, unsub: [], last: null };
 
 const hasFirebase = () => !!(window.FIREBASE_CONFIG && FIREBASE_CONFIG.databaseURL);
-async function firebase() {
-  if (fb) return fb;
-  const [app, db] = await Promise.all([
-    import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app.js`),
-    import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-database.js`),
-  ]);
-  fb = { ...db, db: db.getDatabase(app.initializeApp(FIREBASE_CONFIG)) };
-  return fb;
+let fbPromise = null;
+// Nhớ promise (không nhớ kết quả) vì connectLive và connectDir cùng gọi lúc mở app.
+// Đăng nhập ẩn danh xong mới gắn listener: listener bị permission_denied sẽ không tự gắn lại.
+// Không đăng nhập được thì vẫn chạy như cũ (luật cũ cho phép), uid để trống.
+function firebase() {
+  return fbPromise ||= (async () => {
+    const [app, db, au] = await Promise.all([
+      import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app.js`),
+      import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-database.js`),
+      import(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-auth.js`),
+    ]);
+    const a = app.initializeApp(FIREBASE_CONFIG);
+    const f = { ...db, db: db.getDatabase(a), uid: '', authError: '' };
+    try {
+      const auth = au.getAuth(a);
+      await auth.authStateReady();
+      f.uid = (auth.currentUser || (await au.signInAnonymously(auth)).user).uid;
+    } catch (e) { console.warn('Đăng nhập ẩn danh lỗi', e); f.authError = e.code || e.message || 'lỗi'; }
+    return fb = f;
+  })().catch(e => { fbPromise = null; throw e; });
 }
 const longId = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(12))))
   .replace(/\+/g, '-').replace(/\//g, '_');
@@ -837,6 +852,8 @@ const stable = v => Array.isArray(v) ? '[' + v.map(stable).join(',') + ']'
 
 function toRemote(b) {
   const r = { name: b.name, created: b.created, date: b.date };
+  if (Object.keys(b.owners || {}).length) r.owners = b.owners;
+  r.claims = b.claims || {};
   let t = Date.now();
   for (const c of COLS) {
     r[c] = {};
@@ -847,12 +864,15 @@ function toRemote(b) {
 function fromRemote(val) {
   const b = { name: val.name || '', created: val.created || Date.now() };
   b.date = val.date || isoDate(b.created);
+  b.owners = val.owners || {}; b.claims = val.claims || {};
   for (const c of COLS) b[c] = Object.values(val[c] || {}).sort((x, y) => x.o - y.o);
   return b;
 }
 // Phẳng hoá thành {đường dẫn: JSON} để tính phần thay đổi
 function flatten(r) {
   const f = { name: stable(r.name), created: stable(r.created), date: stable(r.date) };
+  for (const id in r.owners || {}) f[`owners/${id}`] = stable(r.owners[id]);
+  for (const id in r.claims || {}) f[`claims/${id}`] = stable(r.claims[id]);
   for (const c of COLS) for (const id in r[c]) f[`${c}/${id}`] = stable(r[c][id]);
   return f;
 }
@@ -867,12 +887,66 @@ function setLast(id, f) {
   try { localStorage.setItem(LIVE_KEY + id, JSON.stringify(f)); } catch (e) {}
 }
 
+// ---------- Quyền trong bill sửa chung ----------
+// Mô hình: người bật sửa chung là chủ bill (owners). Mỗi người "nhận" một tên thành viên (claims,
+// ai nhận trước được); chỉ chủ hoặc người nhận tên mới sửa được thông tin của tên đó. Khoản chi chỉ
+// người tạo (by) hoặc chủ sửa/xoá. Xoá thành viên, đổi tên bill: chỉ chủ.
+// canWrite phản chiếu database.rules.json: Firebase từ chối cả gói update nếu một đường dẫn bị cấm,
+// nên pushLive lọc trước và hoàn lại phần bị cấm thay vì để mất cả thay đổi hợp lệ.
+const myUid = () => fb?.uid || '';
+const isSecured = b => Object.keys(b.owners || {}).length > 0;
+const guarded = b => !!(b.online && isSecured(b) && myUid());
+const isOwner = b => !guarded(b) || !!b.owners[myUid()];
+const myId = b => guarded(b) ? Object.keys(b.claims || {}).find(k => b.claims[k] === myUid()) || '' : store.me[b.id];
+const canEditMember = (b, m) => isOwner(b) || b.claims?.[m.id] === myUid();
+const canEditExpense = (b, e) => isOwner(b) || e.by === myUid();
+
+function canWrite(b, key, cur, last) {
+  if (!guarded(b) || b.owners[myUid()]) return true;
+  const uid = myUid(), [col, id] = key.split('/');
+  const was = last == null ? undefined : JSON.parse(last), now = cur == null ? undefined : JSON.parse(cur);
+  switch (col) {
+    case 'members': return now !== undefined && (was === undefined || b.claims?.[id] === uid);
+    case 'claims': return (was === undefined && now === uid) || (was === uid && now === undefined);
+    case 'expenses': return was === undefined ? now?.by === uid : was.by === uid && (now === undefined || now.by === was.by);
+    case 'groups': case 'log': return was === undefined && now !== undefined;
+    case 'payments': return true;
+    default: return false;   // name, date, created, owners
+  }
+}
+function revertKey(b, key, last) {
+  const [col, id] = key.split('/'), val = last == null ? undefined : JSON.parse(last);
+  if (COLS.includes(col)) {
+    const i = b[col].findIndex(x => x.id === id);
+    if (val === undefined) { if (i >= 0) b[col].splice(i, 1); }
+    else if (i >= 0) b[col][i] = val;
+    else b[col].push(val);
+    b[col].sort((x, y) => (x.o ?? 0) - (y.o ?? 0));
+  } else if (col === 'claims' || col === 'owners') {
+    if (val === undefined) delete b[col][id]; else b[col][id] = val;
+  } else if (['name', 'date', 'created'].includes(key)) b[key] = val;
+}
+// Máy này từng chọn "tôi là X" trước khi bill có chủ: tự nhận tên X để không phải chọn lại
+function autoClaim(b) {
+  const want = store.me[b.id];
+  if (!guarded(b) || !want || myId(b) || b.claims[want] || !b.members.some(m => m.id === want)) return false;
+  b.claims[want] = myUid();
+  return true;
+}
+
 function pushLive() {
   if (!state.online || live.id !== state.id || !live.last || !fb) return;
   const cur = flatten(toRemote(state));
   const u = diff(cur, live.last);
   if (!Object.keys(u).length) return;
-  setLast(state.id, cur);
+  const denied = Object.keys(u).filter(k => !canWrite(state, k, cur[k], live.last[k]));
+  if (denied.length) {
+    denied.forEach(k => { revertKey(state, k, live.last[k]); delete u[k]; });
+    save(); render();
+    toast(`Bạn không có quyền sửa ${denied.length} mục trong bill này, đã hoàn lại`);
+  }
+  setLast(state.id, flatten(toRemote(state)));
+  if (!Object.keys(u).length) return;
   fb.update(fb.ref(fb.db, 'bills/' + state.id), u).catch(e => { console.warn(e); toast('Không lưu được lên mạng'); });
 }
 
@@ -891,7 +965,8 @@ async function connectLive() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(LIVE_KEY + bill.id)); } catch (e) {}
   if (saved) {
-    const u = diff(flatten(toRemote(bill)), saved);
+    const cur = flatten(toRemote(bill)), u = diff(cur, saved);
+    for (const k of Object.keys(u)) if (!canWrite(bill, k, cur[k], saved[k])) delete u[k];
     if (Object.keys(u).length) fb.update(billRef, u).catch(console.warn);
   }
 
@@ -900,9 +975,10 @@ async function connectLive() {
     if (!val) { toast('Không tìm thấy bill online, có thể link sai'); return; }
     Object.assign(bill, fromRemote(val));
     setLast(bill.id, flatten(toRemote(bill)));
+    const claimed = autoClaim(bill);
     save();
-    if (state === bill) { renderSoon(); maybeAskWho(); }
-  }, e => { console.warn(e); renderLive('Không có quyền truy cập bill'); }));
+    if (state === bill) { renderSoon(); maybeAskWho(); if (claimed) pushLive(); }
+  }, e => { console.warn(e); renderLive(fb.authError ? 'Chưa đăng nhập ẩn danh được: ' + fb.authError : 'Không có quyền truy cập bill'); }));
   live.unsub.push(fb.onValue(fb.ref(fb.db, '.info/connected'), s => renderLive(null, s.val())));
 }
 
@@ -913,9 +989,16 @@ async function goLive(ask = true) {
   const oldId = state.id;
   try {
     await firebase();
-    const id = longId();
+    const id = longId(), uid = myUid();
+    if (uid) {   // bill còn nằm trên máy này nên mọi khoản chi hiện có là của chủ bill
+      state.owners = { [uid]: true };
+      state.expenses.forEach(e => e.by ||= uid);
+      const me = store.me[oldId];
+      state.claims = me && state.members.some(m => m.id === me) ? { [me]: uid } : {};
+    }
     await fb.set(fb.ref(fb.db, 'bills/' + id), toRemote(state));
     state.id = id; state.online = true;
+    if (store.me[oldId] !== undefined) store.me[id] = store.me[oldId];
     setLast(id, flatten(toRemote(state)));
     selectBill(id);
     commit();
@@ -923,7 +1006,7 @@ async function goLive(ask = true) {
     return true;
   } catch (e) {
     console.warn(e);
-    state.id = oldId; state.online = false;
+    state.id = oldId; state.online = false; state.owners = {}; state.claims = {};
     toast('Không bật được sửa chung: ' + (e.code || e.message));
     return false;
   }
@@ -1129,7 +1212,8 @@ function renderLive(error, connected) {
   if (error) { s.className = 'live-status off'; s.innerHTML = `<b>●</b> ${esc(error)}`; return; }
   if (connected === undefined) { s.className = 'live-status'; s.textContent = '☁️ Sửa chung · đang kết nối…'; return; }
   s.className = 'live-status' + (connected ? '' : ' off');
-  s.innerHTML = connected ? '<b>●</b> Sửa chung · đã đồng bộ' : '<b>●</b> Mất kết nối · thay đổi sẽ gửi khi có mạng';
+  const role = guarded(state) ? (isOwner(state) ? ' · bạn là chủ bill' : ' · chỉ sửa phần của bạn') : '';
+  s.innerHTML = connected ? `<b>●</b> Sửa chung · đã đồng bộ${role}` : '<b>●</b> Mất kết nối · thay đổi sẽ gửi khi có mạng';
 }
 
 // ---------- Tính toán ----------
@@ -1376,6 +1460,8 @@ function render() {
   $('memberCount').textContent = state.members.length ? `(${state.members.length})` : '';
   if (document.activeElement !== $('billName')) $('billName').value = state.name;
   if (document.activeElement !== $('billDate')) $('billDate').value = state.date;
+  $('billName').disabled = $('billDate').disabled = !isOwner(state);
+  renderOwn();
 
   renderPeople();
   const hasGroups = groupedMembers().some(x => x.g);
@@ -1400,7 +1486,7 @@ function render() {
       <td class="hide-sm muted">${splitText(e)}</td>
       <td class="show-sm muted" style="font-size:12px; font-weight:600; letter-spacing:1px" title="${splitText(e)}">${splitTextShort(e)}</td>
       <td class="num">${fmt(e.amount)}</td>
-      <td class="acts"><button class="x" data-act="editExp" title="Sửa">✎</button><button class="x" data-act="delExp" title="Xoá">✕</button></td>
+      <td class="acts">${canEditExpense(state, e) ? '<button class="x" data-act="editExp" title="Sửa">✎</button><button class="x" data-act="delExp" title="Xoá">✕</button>' : '<span class="muted" title="Chỉ người tạo khoản chi hoặc chủ bill sửa được">🔒</span>'}</td>
     </tr>`).join('') +
     (state.expenses.length ? `<tr><td class="total" colspan="4">Tổng cộng</td><td class="num total">${fmt(total)}</td><td></td></tr>`
       : '<tr><td colspan="6" class="empty">Chưa có khoản chi</td></tr>');
@@ -1480,10 +1566,10 @@ function renderPeople() {
   renderDirSync();
   const bankOpts = '<option value="">— Ngân hàng —</option>' + BANKS.map(b => `<option value="${b[0]}">${b[1]}</option>`).join('');
   const groupOpts = '<option value="">Không nhóm</option>' + store.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
-  const bankRow = x => `
+  const bankRow = (x, locked) => `
       <div class="row">
-        <select data-f="bank" style="flex:1 1 160px">${bankOpts}</select>
-        <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 160px" value="${esc(x.account || '')}">
+        <select data-f="bank" style="flex:1 1 160px" ${locked ? 'disabled' : ''}>${bankOpts}</select>
+        <input data-f="account" placeholder="Số tài khoản" inputmode="numeric" style="flex:1 1 160px" value="${esc(x.account || '')}" ${locked ? 'disabled' : ''}>
       </div>`;
   const scanBtn = '<button type="button" class="x" data-scan title="Quét QR ngân hàng để tự điền ngân hàng + số tài khoản">📷</button>';
   // Nhóm danh bạ + ô chọn nhóm cho người mới
@@ -1514,17 +1600,20 @@ function renderPeople() {
   // Thành viên của bill: nhãn các nhóm của từng người
   const tags = (x, groups) => groupsOf(x).map(id => groups.find(g => g.id === id)).filter(Boolean)
     .map(g => `<span class="tag">👥 ${esc(g.name)}</span>`).join('');
-  const billCard = m => `
+  const billCard = m => { const mine = canEditMember(state, m), owner = isOwner(state);
+    const taker = guarded(state) && state.claims[m.id];
+    return `
     <div class="member" data-id="${m.id}">
       <div class="row top-line">
-        <span class="name">${esc(m.name)}${m.id === store.me[state.id] ? ' <span class="tag">(bạn)</span>' : ''}</span>
-        ${scanBtn}
-        <button class="x" data-act="renameMember" title="Đổi tên">✎</button>
+        <span class="name">${esc(m.name)}${m.id === myId(state) ? ' <span class="tag">(bạn)</span>' : ''}${taker && m.id !== myId(state) ? ' <span class="tag">đã có người nhận</span>' : ''}</span>
+        ${mine ? scanBtn : ''}
+        ${mine ? '<button class="x" data-act="renameMember" title="Đổi tên">✎</button>' : ''}
         ${personOf(m) ? '' : '<button class="x" data-act="saveDir" title="Lưu người này vào danh bạ của bạn">📇 Lưu danh bạ</button>'}
-        <button class="x" data-act="delMember" title="Bỏ khỏi bill">✕</button>
+        ${owner && taker && m.id !== myId(state) ? '<button class="x" data-act="unclaim" title="Cho người khác nhận lại tên này">Gỡ nhận tên</button>' : ''}
+        ${owner ? '<button class="x" data-act="delMember" title="Bỏ khỏi bill">✕</button>' : ''}
       </div>
-      ${groupsOf(m).length ? `<div class="gtoggles">${tags(m, state.groups)}</div>` : ''}${bankRow(m)}
-    </div>`;
+      ${groupsOf(m).length ? `<div class="gtoggles">${tags(m, state.groups)}</div>` : ''}${bankRow(m, !mine)}
+    </div>`; };
   $('members').innerHTML = !state.members.length ? '<div class="empty">Bill chưa có ai. Chọn từ danh bạ ở trên.</div>'
     : orderedMembers().map(billCard).join('');
   state.members.forEach(m => $('members').querySelector(`[data-id="${m.id}"] [data-f=bank]`).value = m.bank || '');
@@ -1672,6 +1761,7 @@ $('scanClose').addEventListener('click', stopScanner);
 $('scanDialog').addEventListener('cancel', e => { e.preventDefault(); stopScanner(); });
 for (const list of ['members', 'people']) $(list).addEventListener('click', e => {
   if (!e.target.closest('[data-scan]')) return;
+  if (list === 'members' && !canEditMember(state, state.members.find(m => m.id === e.target.closest('.member').dataset.id))) return;
   openScanner({ list, id: e.target.closest('.member').dataset.id });
 });
 
@@ -1832,12 +1922,12 @@ $('restoreFile').addEventListener('change', async e => {
 });
 
 // ---------- "Bạn là ai trong bill?" (lưu trên máy, không đồng bộ) ----------
-const meOf = () => state.members.find(m => m.id === store.me[state.id]);
+const meOf = () => state.members.find(m => m.id === myId(state));
 // Bill sửa chung: khoản đã xác nhận chỉ người nhận được huỷ; khoản chưa xác nhận thì hai người trong cuộc.
 // Tên do người dùng tự chọn nên đây là chặn bấm nhầm, chưa phải phân quyền thật. Bill trên máy thì không giới hạn.
 const canUndoPay = p => {
   if (!state.online) return true;
-  const me = store.me[state.id];
+  const me = myId(state);
   return !!me && (p.status === 'confirmed' ? me === p.to : me === p.from || me === p.to);
 };
 function maybeAskWho() {
@@ -1847,17 +1937,24 @@ function maybeAskWho() {
 }
 function showWho() {
   $('whoBill').textContent = `${state.name || 'Bill'} · ${viDate(state.date)}`;
-  $('whoList').innerHTML = state.members.map(m =>
-    `<button type="button" data-who="${m.id}">${esc(m.name)}</button>`).join('');
+  const taken = m => guarded(state) && state.claims[m.id] && state.claims[m.id] !== myUid();
+  $('whoList').innerHTML = state.members.map(m => taken(m)
+    ? `<button type="button" disabled>${esc(m.name)} <span class="muted">· đã có người nhận</span></button>`
+    : `<button type="button" data-who="${m.id}">${esc(m.name)}</button>`).join('');
   $('whoNewName').value = '';
   $('whoDialog').dataset.bill = state.id;
   if (!$('whoDialog').open) $('whoDialog').showModal();
 }
 function setMe(id) {
+  if (guarded(state)) {   // bill có chủ: chọn tên = nhận tên, mỗi tên một người
+    const c = state.claims[id], mine = myId(state);
+    if (id && c && c !== myUid()) return toast('Tên này đã có người nhận. Nếu đó là bạn, nhờ chủ bill gỡ nhận tên.');
+    if (mine && mine !== id) delete state.claims[mine];
+    if (id) state.claims[id] = myUid();
+  }
   store.me[$('whoDialog').dataset.bill] = id;
-  save();
   $('whoDialog').close();
-  render();
+  commit();
   const me = meOf();
   if (me) toast(`Dzô ${me.name}! Phần của bạn ở đầu trang.`);
 }
@@ -2099,6 +2196,16 @@ $('btnDup').addEventListener('click', () => {
   $('billName').focus(); $('billName').select();
 });
 $('btnLive').addEventListener('click', goLive);
+const renderOwn = () => { $('btnOwn').hidden = !(state.online && !isSecured(state) && myUid()); };
+// Bill sửa chung tạo từ bản cũ chưa có chủ: người đầu tiên bấm sẽ thành chủ
+$('btnOwn').addEventListener('click', async () => {
+  if (!myUid() || isSecured(state)) return;
+  if (!confirm('Nhận làm chủ bill này?\n\nChỉ chủ bill xoá được thành viên và đổi tên bill; mỗi người chỉ sửa được phần của mình. Chỉ bấm nếu bạn là người tạo bill.')) return;
+  try {
+    await fb.update(fb.ref(fb.db, 'bills/' + state.id), { ['owners/' + myUid()]: true });
+    toast('✓ Bạn là chủ bill. Người khác giờ chỉ sửa được phần của họ.');
+  } catch (e) { console.warn(e); toast('Không nhận được: ' + (e.code || e.message)); }
+});
 $('btnDelete').addEventListener('click', () => {
   const name = state.name || 'Bill chưa đặt tên';
   if (!confirm(state.online
@@ -2138,8 +2245,15 @@ $('addFromDir').addEventListener('click', e => {
 
 $('members').addEventListener('click', e => {
   const act = e.target.dataset.act;
+  if (act === 'unclaim' && isOwner(state)) {
+    const m = state.members.find(x => x.id === e.target.closest('.member').dataset.id);
+    delete state.claims[m.id];
+    logEvent(state, `gỡ nhận tên ${m.name}`);
+    return commit();
+  }
   if (act === 'renameMember') {
     const m = state.members.find(x => x.id === e.target.closest('.member').dataset.id);
+    if (!canEditMember(state, m)) return;
     const name = (prompt('Tên mới:', m.name) || '').trim();
     if (!name || name === m.name) return;
     m.name = name;
@@ -2169,7 +2283,7 @@ $('members').addEventListener('click', e => {
     }
     return commit();
   }
-  if (act !== 'delMember') return;
+  if (act !== 'delMember' || !isOwner(state)) return;
   const id = e.target.closest('.member').dataset.id;
   const used = state.expenses.some(x => x.payer === id || x.split.includes(id)) ||
                state.payments.some(p => p.from === id || p.to === id);
@@ -2199,6 +2313,7 @@ $('members').addEventListener('click', e => {
 $('members').addEventListener('change', e => {
   const f = e.target.dataset.f; if (!f) return;
   const m = state.members.find(m => m.id === e.target.closest('.member').dataset.id);
+  if (!canEditMember(state, m)) return;
   const oldKey = bankKey(m);
   m[f] = e.target.value.trim();
   trustBank(state, m);
@@ -2299,7 +2414,7 @@ $('expForm').addEventListener('submit', e => {
     logEvent(state, `sửa khoản “${data.desc || 'khoản chi'}”` + (before !== amount ? `: ${fmt(before)} → ${fmt(amount)}` : ''));
     toast('Đã lưu khoản chi');
   } else {
-    state.expenses.push({ id: uid(), ...data });
+    state.expenses.push({ id: uid(), ...data, ...(state.online && myUid() ? { by: myUid() } : {}) });
     logEvent(state, `thêm khoản “${data.desc || 'khoản chi'}” ${fmt(amount)}`);
   }
   if (editingId) endEdit(); else clearExpForm(false);
@@ -2310,6 +2425,8 @@ $('expenses').addEventListener('click', e => {
   const act = e.target.dataset.act;
   if (!act) return;
   const id = e.target.closest('tr').dataset.id;
+  const ex = state.expenses.find(x => x.id === id);
+  if (!ex || !canEditExpense(state, ex)) return;
   if (act === 'editExp') return startEdit(id);
   if (act !== 'delExp') return;
   if (id === editingId) endEdit();
